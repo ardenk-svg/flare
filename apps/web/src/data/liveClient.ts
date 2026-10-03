@@ -11,15 +11,27 @@ export interface TokenStore { get(): string | undefined; set(token: string): voi
 export interface LiveConfig {
   uri: string;
   database: string;
-  /** Where this client's identity token lives. Defaults to browser localStorage. */
+  /** Where this client's identity token lives. Defaults to `browserTokenStore("default")`. */
   tokenStore?: TokenStore;
 }
 
-const TOKEN_KEY = "flare-live-token";
-const localTokenStore: TokenStore = {
-  get: () => { try { return localStorage.getItem(TOKEN_KEY) ?? undefined; } catch { return undefined; } },
-  set: (t) => { try { localStorage.setItem(TOKEN_KEY, t); } catch { /* ignore */ } },
-};
+const LEGACY_TOKEN_KEY = "flare-live-token";
+/**
+ * Browser token store keyed by view, e.g. `flare-live-token:dispatcher` or `flare-live-token:responder:FIRE-01`,
+ * so both routes can hold distinct identities in one browser profile. `legacyFallback` reads the old
+ * single key once, so a dispatcher identity granted before per-role keys is kept.
+ */
+export function browserTokenStore(scope: string, { legacyFallback = false } = {}): TokenStore {
+  const key = `${LEGACY_TOKEN_KEY}:${scope}`;
+  return {
+    get: () => {
+      try {
+        return localStorage.getItem(key) ?? (legacyFallback ? localStorage.getItem(LEGACY_TOKEN_KEY) ?? undefined : undefined);
+      } catch { return undefined; }
+    },
+    set: (t) => { try { localStorage.setItem(key, t); } catch { /* ignore */ } },
+  };
+}
 
 export function toExtraction(i: Incident): IncidentView["extraction"] {
   return i.extractionState === "FAILED"
@@ -46,7 +58,7 @@ export interface LiveClient extends FlareClient {
 }
 
 export function createLiveClient(cfg: LiveConfig): LiveClient {
-  const tokens = cfg.tokenStore ?? localTokenStore;
+  const tokens = cfg.tokenStore ?? browserTokenStore("default");
   let closed = false;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<() => void>();

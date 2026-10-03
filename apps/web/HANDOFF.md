@@ -32,11 +32,11 @@ Cross-client checks pass only when an update arrives by subscription, since the 
 
 ## Live mode in the browser
 1. Setup above, then `cd apps/web && cp .env.example .env.local && npm run dev`.
-2. Open `/dispatcher` and `/responder` in **separate browser profiles**, since the token lives in `localStorage` key `flare-live-token`. A new identity shows "no role yet" with its hex. Grant it: `spacetime call --server local flare-dev grant_role <hex> DISPATCHER '{"none":[]}'` or `... RESPONDER '{"some":"FIRE-01"}'`. The page updates without reload.
+2. Open `/dispatcher` and `/responder` side by side in one browser profile. Each route keeps its own identity token in `localStorage`: `flare-live-token:dispatcher`, `flare-live-token:responder`, or `flare-live-token:responder:<UNIT>` when the URL has `?unit=<UNIT>` (use it to run a second responder tab). The dispatcher falls back once to the old single key `flare-live-token`, so an identity granted before this change keeps its role. A new identity shows "no role yet" with its hex. Grant it: `spacetime call --server local flare-dev grant_role <hex> DISPATCHER '{"none":[]}'` or `... RESPONDER '{"some":"FIRE-01"}'`. The page updates without reload. The fixture-only "Responder (EMS-01)" nav link is hidden in live mode.
 
 ## Interfaces
 - `src/types.ts` re-exports `Service`, `IncidentStatus`, `AssignmentStatus`, `CallerFacts`, `Evidence`, `Unit`, `Assignment`, `ExtractionState`, and `ASSIGNMENT_ORDER` from `@flare/contracts`. `IncidentView`, `Snapshot`, `FlareClient`, and `OpResult` are UI-level.
-- `src/data/liveClient.ts`: `createLiveClient({ uri, database, tokenStore? })` returns a `LiveClient` (`FlareClient` + `close()`). `toExtraction()` maps the contract's `extractionState`/`extractionError`.
+- `src/data/liveClient.ts`: `browserTokenStore(scope, { legacyFallback? })` is the per-view localStorage token store. `createLiveClient({ uri, database, tokenStore? })` returns a `LiveClient` (`FlareClient` + `close()`). `toExtraction()` maps the contract's `extractionState`/`extractionError`.
 - `src/data/fixtureClient.ts`: encodes the contract rules for offline demos. Fixture assignments now carry `service` and `createdAt`.
 
 ## Checks run (2026-10-03, local in-memory SpacetimeDB 2.10.2, Node 26.7, main @ 7676d47 + this branch)
@@ -52,7 +52,6 @@ Cross-client checks pass only when an update arrives by subscription, since the 
 
 ## Unresolved / needs others
 - **Root `npm run check` fails on main in `apps/agent`, not the web app.** Person 1's merged orchestrator predates Person 3's contract change: `data-port.ts` omits `route` in `recordInbound`, and the agent test fixtures lack `route`, `extractionState`, and `caseEpoch`. Person 1 needs to rebase.
-- The browser pass used one profile with tokens swapped between roles. Simultaneous two-profile updates are covered by the smoke, not by eye.
 - Reconnect was tested by closing a client and reconnecting with the same token. Losing the server mid-session hasn't been tested, because an `--in-memory` restart wipes data. Test it on a persistent database.
 - Not yet run against the shared Maincloud database. Person 3 hasn't announced it yet.
 - Responder evidence stays hidden in the UI. Confirm which projection fields responders may see.

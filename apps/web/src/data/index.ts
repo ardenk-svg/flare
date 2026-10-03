@@ -1,7 +1,17 @@
 import { createContext, useContext, useSyncExternalStore } from "react";
 import type { FlareClient, Identity, Snapshot } from "../types";
 import { createFixtureClient, type FixtureClient } from "./fixtureClient";
-import { createLiveClient } from "./liveClient";
+import { browserTokenStore, createLiveClient } from "./liveClient";
+
+// One identity per view so /dispatcher and /responder can run side by side in one browser profile.
+// `?unit=` gives a responder tab its own identity per unit.
+function routeTokenStore() {
+  if (location.pathname.startsWith("/responder")) {
+    const unit = new URLSearchParams(location.search).get("unit");
+    return browserTokenStore(unit ? `responder:${unit}` : "responder");
+  }
+  return browserTokenStore("dispatcher", { legacyFallback: true });
+}
 
 // VITE_DATA_MODE=live connects to SpacetimeDB; anything else uses the labelled in-memory fixture.
 export function createClient(): FlareClient {
@@ -9,7 +19,9 @@ export function createClient(): FlareClient {
   if (env.VITE_DATA_MODE === "live") {
     if (!env.VITE_SPACETIMEDB_URI || !env.VITE_SPACETIMEDB_DATABASE)
       throw new Error("Live mode needs VITE_SPACETIMEDB_URI and VITE_SPACETIMEDB_DATABASE");
-    return createLiveClient({ uri: env.VITE_SPACETIMEDB_URI, database: env.VITE_SPACETIMEDB_DATABASE });
+    return createLiveClient({
+      uri: env.VITE_SPACETIMEDB_URI, database: env.VITE_SPACETIMEDB_DATABASE, tokenStore: routeTokenStore(),
+    });
   }
   const params = new URLSearchParams(location.search);
   const role = params.get("as") ?? (location.pathname.startsWith("/responder") ? "responder" : "dispatcher");
