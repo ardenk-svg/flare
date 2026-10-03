@@ -1,0 +1,19 @@
+{
+  "name": "@flare/spacetime",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "spacetime build",
+    "typecheck": "tsc --noEmit",
+    "publish:local": "spacetime publish --server local --module-path . ${FLARE_DB:-flare-dev} --yes",
+    "generate": "spacetime generate --lang typescript --out-dir ../packages/data/src/bindings --module-path . --yes",
+    "reset:local": "spacetime call --server local ${FLARE_DB:-flare-dev} reset_demo"
+  },
+  "dependencies": {
+    "spacetimedb": "2.10.2"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}

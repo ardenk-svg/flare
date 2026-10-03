@@ -1,0 +1,22 @@
+{
+  "name": "@flare/data",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "check": "tsx scripts/check.ts"
+  },
+  "dependencies": {
+    "@flare/contracts": "file:../contracts",
+    "spacetimedb": "2.10.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "~5.9.3"
+  }
+}

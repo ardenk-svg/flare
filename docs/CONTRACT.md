@@ -1,6 +1,6 @@
 # Flare integration contract
 
-This is the proposed v1 application contract for the ten-hour build. Person 3 owns it with input from the other three teammates and implements the corresponding shared TypeScript types in `packages/contracts/`. Those files do not exist yet. This document defines application semantics, not exact Spectrum, Gemini, or Spacetime SDK signatures. Use actual generated bindings behind the thin data adapter.
+This is the proposed v1 application contract for the ten-hour build. Person 3 owns it with input from the other three teammates. The shared TypeScript types are in `packages/contracts/`; see [Implemented v1 surface](#implemented-v1-surface). This document defines application semantics, not exact Spectrum, Gemini, or Spacetime SDK signatures. Use actual generated bindings behind the thin data adapter.
 
 Read the [shared handoff](../handoff.md) first. Change this contract, exported types, fixtures and consumers together; do not independently rename fields.
 
@@ -164,6 +164,29 @@ Here APPLIED means the input was handled successfully: either its intake result 
 The frontend disables invalid actions, but reducers remain authoritative. Provision roles with an operator-controlled allowlist; do not allow a client to grant itself a dispatcher or administrator role. Dispatcher and responder demos use distinct identities; a URL path is not permission. The agent alone can write intake and messaging state.
 
 Queue dispatch-confirmed and assignment-EN_ROUTE events with enough committed context to render truthful messages. An unsent old event must not claim an outdated state is current: render it explicitly as a past event, coalesce superseded jobs, or skip it after checking current state. Use stable notification IDs, record attempts, and check provider idempotency before assuming retry guarantees. A crash between external send and acknowledgment can still cause duplicate delivery.
+
+## Implemented v1 surface
+
+Types live in `@flare/contracts` (`packages/contracts/src/index.ts`). Operations are functions in `@flare/data` (`packages/data/src/index.ts`) taking a connected `DbConnection`; see [spacetime/HANDOFF.md](../spacetime/HANDOFF.md) for setup.
+
+| Operation | `@flare/data` function | Notes |
+|---|---|---|
+| `recordInbound` | `recordInbound(conn, { provider, conversationKey, messages })` → `ConversationContext` | Dedupe key is provider + conversationKey + message ID |
+| Context read | `getConversationContext(conn, conversationKey)` | `intakeRevision` is `0` while there is no active incident; `pendingMessages` are RECEIVED |
+| `recordExtractionFailure` | `recordExtractionFailure(conn, { conversationKey, messageIds, error })` | |
+| `applyIntakePatch` | `applyIntakePatch(conn, { conversationKey, expectedRevision, sourceMessageIds, result, recommendation })` | REPORT/CORRECTION only. Evidence quotes must be exact substrings of a recorded message in the same conversation. New evidence for a field replaces older evidence for that field |
+| `completeInboundWithoutPatch` | `completeInboundWithoutPatch(conn, { conversationKey, messageIds, intent, replyText? })` | `replyText` is queued as an `INFO_REPLY` notification |
+| `recordSentQuestion` | `recordSentQuestion(conn, { conversationKey, question, delivered, error? })` | |
+| Pending notifications | `listPendingNotifications(conn)`, `onNotification(conn, cb)` | PENDING and FAILED jobs; each carries committed `text`, `eventAt`, `eventAssignmentStatus` |
+| `ackNotification` | `ackNotification(conn, { notificationId, delivered, error? })` | |
+| `confirmDispatchAndAssign` | `confirmDispatchAndAssign(conn, { incidentId, confirmedServices, unitIds })` | |
+| `advanceAssignment` | `advanceAssignment(conn, { assignmentId, nextStatus })` | `nextStatus` must be the next stage |
+| `resolveIncident` | `resolveIncident(conn, { incidentId })` | |
+| Reads | `listIncidents`, `listAssignments`, `listUnits`, `getMyRole` | Role-scoped: a responder sees only its unit's assignments and their incidents |
+
+Rejected operations throw `FlareOpError` with a `code`: `UNAUTHORIZED`, `NOT_FOUND`, `STALE_REVISION`, `PARTIALLY_APPLIED_SOURCES`, `UNKNOWN_MESSAGE`, `INVALID_INTENT`, `INVALID_FIELD`, `INVALID_VALUE_TYPE`, `MISSING_EVIDENCE`, `EVIDENCE_QUOTE_MISMATCH`, `UNKNOWN_EVIDENCE_MESSAGE`, `NOT_READY`, `ALREADY_DISPATCHED`, `UNIT_CONFLICT`, `UNIT_SERVICE_MISMATCH`, `SERVICE_WITHOUT_UNIT`, `INVALID_TRANSITION`, `ASSIGNMENTS_NOT_COMPLETED`, among others.
+
+Roles are `ADMIN`, `AGENT`, `DISPATCHER`, and `RESPONDER` (bound to one unit). The identity that first publishes the module becomes `ADMIN` and grants the other roles by identity. An identity without a grant sees empty views and cannot call operations.
 
 ## Synthetic demo fixture
 
