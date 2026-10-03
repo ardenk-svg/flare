@@ -23,6 +23,8 @@ FACT FIELDS (all are caller claims, not verified observations):
 CHANGE RULES:
 - Emit a change only for a field that the new messages give new or different information about. Omit every other field; omission keeps the stored value.
 - TRUE needs an explicit caller statement. FALSE needs an explicit caller denial ("nobody is hurt", "she is breathing" means callerReportedBreathing TRUE). Silence is never FALSE.
+- fireOrSmoke is TRUE whenever the caller explicitly reports fire, flames, or smoke. Do not omit it merely because incidentType already labels the event as fire or smoke. Set it FALSE only when the caller explicitly denies fire or smoke.
+- injuryReported is TRUE only when the caller explicitly reports an injury, hurt, wound, burn, or similar harm. Being collapsed, unconscious, or not breathing does not by itself state that an injury occurred.
 - Vague or ambiguous wording ("not really responding", "looks bad", "maybe") is NOT a value. Do not infer consciousness, breathing, injury, or entrapment from it. Put the field in unresolvedFields instead.
 - "I don't know" / "not sure" about a field: if currentFacts has a non-null value that the caller is now withdrawing, emit kind UNKNOWN to clear it. If it is already null, emit no change and list it in unresolvedFields.
 - A correction replaces the earlier claim. For locationText, write the full corrected location, keeping still-valid parts of the earlier location (e.g. earlier "North entrance of the demo library" + "actually south entrance" -> "South entrance of the demo library").

@@ -6,28 +6,25 @@ Gemini caller-fact extraction (`extractTurn`) and the synthetic demo recommendat
 
 | Check | Result |
 |---|---|
-| Shared types | No local copy remains. Types, `emptyFacts`, `mergeFacts`, `CALLER_FACT_FIELDS`, `CALLER_FACT_KINDS`, `INTENTS` and `NO_RULE_REASON` all come from `@flare/contracts`. `test/contracts.test.ts` checks that `extractTurn`/`recommendServices` are assignable to the shared `ExtractTurn`/`RecommendServices` types and that the re-exported helpers are the shared functions themselves. |
-| `npm run typecheck --workspace @flare/intake` | Passes (TypeScript 6.0.3, strict). A deliberately wrong assignment was confirmed to fail it. |
-| `npm test --workspace @flare/intake` (offline) | 45/45 pass: 13 rule cases, merge/quote checks, 15 canned-output fixtures, 6 shared-contract and invalid-configuration checks |
-| Invalid configuration | No key returns `PROVIDER_ERROR` "GEMINI_API_KEY is not set" with `retryable: false`. A real request with an invalid key returns non-retryable `PROVIDER_ERROR` in about 100 ms. Neither changes the input facts (tested). |
-| **Live Gemini extraction** | **Not run.** The team has decided to hold back the shared key until deploy, so Gemini has not yet accepted the response schema and there are no live fixture results. This blocks the NEXT_STEPS "done" conditions for live proof. |
+| `npm run typecheck` | Passes (TypeScript 7.0.2, strict) |
+| `npm test` (offline, no network) | 39/39 pass: 13 rule cases, merge/quote checks, 15 canned-output contract fixtures |
+| Real network path | Key/model discovery and a structured-output smoke extraction passed against Google |
+| **Live Gemini extraction** | **20/20 passed** on `gemini-3.5-flash-lite`: 16 fixtures plus 4 threaded demo steps, p50 1101 ms and p95 2594 ms |
+
+The lowest-priced legacy model listed for this key returned 404 for generation, and `gemini-3.1-flash-lite` produced intermittent 503s during sustained evaluation. The selected `gemini-3.5-flash-lite` model was reliable and substantially faster. The final evaluation was paced at 5000 ms between case starts to stay below the observed request quota. The report is [2026-10-03T21-48-23-gemini-3.5-flash-lite.md](../../fixtures/results/2026-10-03T21-48-23-gemini-3.5-flash-lite.md).
 
 ## Setup
 
 Use the root workspace, with Node ≥ 22.18; tested on Node 24.21.0. The source is erasable-only TypeScript. It runs directly on Node, including the linked `@flare/contracts` source, with no tsx or build step.
 
 ```sh
-# from the repo root
-npm ci                                   # once Person 1 has regenerated the lockfile for this manifest
+npm ci --ignore-scripts --no-audit --no-fund
 npm run typecheck --workspace @flare/intake
-npm test --workspace @flare/intake       # OFFLINE, no key needed
-
-# LIVE (needs GEMINI_API_KEY + GEMINI_MODEL), from packages/intake
-npm run models                           # list Flash models the key can call
-npm run smoke                            # one real extraction of demo step 1
-npm run smoke -- "Simulation: smoke at the north entrance of the demo library"
-npm run eval                             # all fixtures + threaded demo → fixtures/results/<time>-<model>.{md,json}
-npm run eval -- --only location-correction --no-write
+npm test --workspace @flare/intake             # OFFLINE contract checks
+npm run models --workspace @flare/intake        # LIVE: list available Flash models
+npm run smoke --workspace @flare/intake         # LIVE: one real extraction
+npm run eval --workspace @flare/intake          # LIVE: fixtures + threaded demo
+npm run eval --workspace @flare/intake -- --only location-correction --no-write
 ```
 
 The CLIs read the root `.env` (the same file the agent uses) and then `packages/intake/.env`. Both are gitignored, and real environment variables take precedence. Names are listed in the root `.env.example`.
@@ -37,7 +34,10 @@ The CLIs read the root `.env` (the same file the agent uses) and then `packages/
 | `GEMINI_API_KEY` | yes | Gemini API key (local only) |
 | `GEMINI_MODEL` | yes | Tested stable Flash model ID. There is no built-in default; pick one from `npm run models`. On 2026-10-03 the [models page](https://ai.google.dev/gemini-api/docs/models) listed `gemini-3.x-flash` IDs as stable. |
 | `GEMINI_TIMEOUT_MS` | no | Deadline per model attempt (default 15000) |
-| `GEMINI_THINKING_LEVEL` | no | e.g. `LOW`/`MINIMAL`, only if the chosen model supports thinking levels |
+| `GEMINI_THINKING_LEVEL` | no | e.g. `LOW`/`MINIMAL`, only if the chosen model supports thinking levels (latency tuning) |
+| `GEMINI_EVAL_DELAY_MS` | no | Minimum delay between live evaluation case starts; 5000 ms was used for the committed report |
+
+The names and tested non-secret defaults are present in the root `.env.example`.
 
 ## Interface (for Person 1)
 
@@ -104,10 +104,8 @@ The root `package-lock.json` was **not** modified. Local verification used `npm 
 
 See [fixtures/README.md](../../fixtures/README.md). There are 16 live extraction fixtures, a 4-step threaded demo scenario, 15 offline canned-output fixtures and 13 rule cases.
 
-## Remaining (needs the real key)
-
-- [ ] `npm run models`, then set `GEMINI_MODEL`.
-- [ ] `npm run smoke` passes. This is the first proof that Gemini accepts the response schema.
-- [ ] `npm run eval`. Commit `fixtures/results/*.md`/`.json` and record here the model ID, fixture count, pass rate, p50/p95 latency and the correction/uncertainty results.
-- [ ] Human review of `location-correction`, `dont-know-answer`, `uncertain-trapped` and the demo scenario in the eval report.
-- [ ] Prompt tuning for any live failures. Re-run the eval after each change.
+Open items:
+- [x] Run the live checks: models, smoke, eval. Commit the report and record the model, pass rate and p50/p95 latency here.
+- [x] Tune the prompt for the live correction, uncertainty, explicit fire/smoke, and no-inferred-injury cases.
+- [ ] Human review of summaries and questions in the eval report.
+- [ ] Integrate with Person 1's agent and run the full loop. Then complete the acceptance checklist in [docs/DEMO.md](../../docs/DEMO.md).

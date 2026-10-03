@@ -2,7 +2,7 @@
 
 Flare is a ten-hour MHacks project for four teammates: a simulated incident report arrives through iMessage, Gemini extracts and updates caller-reported facts, and a dispatcher and responders coordinate through SpacetimeDB.
 
-**Current status:** the merged npm workspace installs reproducibly, and Person 1's agent now connects Spectrum to the intake and data packages, retries stale/pending intake, answers status from committed state, and drains asynchronous notification jobs through durable local routes. Photon cloud startup is verified. The supplied Maincloud database does not yet expose the Flare schema, no Google Gemini API key is configured, and a real phone message round-trip is still pending. See [NEXT_STEPS.md](NEXT_STEPS.md) for the shared integration board.
+**Current status:** the merged npm workspace installs reproducibly, and Person 1's agent now connects Spectrum to the intake and data packages, retries stale/pending intake, answers status from committed state, and drains asynchronous notification jobs through durable local routes. Photon cloud startup is verified, and live Gemini extraction passes all 20 evaluation cases with `gemini-3.5-flash-lite`. The supplied Maincloud database does not yet expose the Flare schema, so the complete database and real-phone round-trip remain pending. See [NEXT_STEPS.md](NEXT_STEPS.md) for the shared integration board.
 
 ## Start here
 

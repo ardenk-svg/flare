@@ -41,7 +41,9 @@ The root `.env` is optional when values are exported by the process. It is ignor
 | `SPACETIMEDB_DATABASE` | integrated worker | Database name or identity |
 | `SPACETIMEDB_AGENT_TOKEN` | optional | Existing authorized identity; otherwise the minted token is persisted locally |
 | `GEMINI_API_KEY` | live extraction | Google AI API key used by `@google/genai` |
-| `GEMINI_MODEL` | live extraction | Tested stable model; local recommendation is `gemini-2.5-flash-lite` for cost |
+| `GEMINI_MODEL` | live extraction | Tested stable model; use `gemini-3.5-flash-lite` for the reliable low-cost path verified by the live evaluation |
+| `GEMINI_TIMEOUT_MS` | optional | Per-attempt extraction deadline; tested at 30000 ms |
+| `GEMINI_THINKING_LEVEL` | optional | Model thinking level; tested at `LOW` for this extraction task |
 | `FLARE_AGENT_STATE_PATH` | optional | Override ignored token/route state file |
 | `FLARE_NOTIFICATION_POLL_MS` | optional | Poll interval, default 2000 ms |
 | `FLARE_NOTIFICATION_MAX_ATTEMPTS` | optional | External delivery attempt ceiling, default 5 |
@@ -57,15 +59,14 @@ On the first successful schema connection without a token, the worker persists t
 - `npm run install:module`: passed; `spacetime` TypeScript check passed. The module build could not run because this host does not have the `spacetime` CLI installed.
 - Photon cloud echo diagnostic: authenticated and reached the listening state with the `imessage` provider. No real phone message was sent during this check.
 - Supplied Maincloud database: the server responded, but subscription failed because the expected `my_role` Flare view does not exist. The Flare module/bindings must be published to the intended database before the integrated worker can run there.
-- Live Gemini: not run because no Google `GEMINI_API_KEY` is configured. Missing configuration returns the existing typed provider failure and leaves inbound messages retryable.
+- Live Gemini: model discovery and smoke passed with the local Google credential. The paced `gemini-3.5-flash-lite` evaluation passed 20/20 cases (p50 1101 ms, p95 2594 ms); see the committed report under `fixtures/results/`. Missing configuration still returns the existing typed provider failure and leaves inbound messages retryable.
 
 The focused agent tests cover normalization and line routing, per-conversation serialization, state recovery, report application, recommendation flow, stale revision retry, duplicate no-op, status shortcut, OTHER, extraction failure, clarification failure, asynchronous notification send/ack failure, retry ceilings, and secret redaction.
 
 ## Remaining external integration gates
 
 1. Person 3 publishes the Flare module to the intended persistent database and grants the persisted agent identity `AGENT`.
-2. Supply a Google Gemini API key and run Person 2's `models`, `smoke`, and live evaluation commands with the configured model.
-3. Run terminal → Gemini → database → both browser roles before testing the phone.
-4. Run a real iMessage report/correction, dispatch and EN_ROUTE update, status inquiry, restart drain, resolve, and a clean second case in the same thread.
+2. Run terminal → Gemini → database → both browser roles before testing the phone.
+3. Run a real iMessage report/correction, dispatch and EN_ROUTE update, status inquiry, restart drain, resolve, and a clean second case in the same thread.
 
 External delivery is at-least-once around a crash: a crash after Spectrum accepts a send but before SpacetimeDB records its acknowledgment can produce a duplicate. The worker prevents duplicate sends after a successful acknowledgment within one process, but it does not claim exactly-once delivery.
