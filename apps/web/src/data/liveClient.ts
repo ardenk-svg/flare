@@ -7,11 +7,28 @@ import {
 import type { Incident } from "@flare/contracts";
 import type { Assignment, FlareClient, Identity, IncidentView, OpResult, Snapshot } from "../types";
 
-export interface LiveConfig { uri: string; database: string }
+export interface TokenStore { get(): string | undefined; set(token: string): void }
+export interface LiveConfig {
+  uri: string;
+  database: string;
+  /** Where this client's identity token lives. Defaults to browser localStorage. */
+  tokenStore?: TokenStore;
+}
 
 const TOKEN_KEY = "flare-live-token";
-const readToken = () => { try { return localStorage.getItem(TOKEN_KEY) ?? undefined; } catch { return undefined; } };
-const writeToken = (t: string) => { try { localStorage.setItem(TOKEN_KEY, t); } catch { /* ignore */ } };
+const localTokenStore: TokenStore = {
+  get: () => { try { return localStorage.getItem(TOKEN_KEY) ?? undefined; } catch { return undefined; } },
+  set: (t) => { try { localStorage.setItem(TOKEN_KEY, t); } catch { /* ignore */ } },
+};
+
+type ExtractionState = IncidentView["extraction"]["state"];
+
+// Prefer the shared extraction state once the contract exposes it; until then only FAILED is observable.
+export function toExtraction(i: Incident): IncidentView["extraction"] {
+  const shared = (i as Incident & { extractionState?: ExtractionState }).extractionState;
+  const state: ExtractionState = shared ?? (i.extractionError ? "FAILED" : "OK");
+  return state === "FAILED" ? { state, message: i.extractionError ?? undefined } : { state };
+}
 
 function toView(i: Incident): IncidentView {
   return {
@@ -21,12 +38,20 @@ function toView(i: Incident): IncidentView {
     recommendedServices: i.recommendedServices, recommendationReason: i.recommendationReason,
     ruleIds: i.recommendationRuleIds, confirmedServices: i.confirmedServices,
     needsReview: i.needsReview,
-    extraction: i.extractionError ? { state: "FAILED", message: i.extractionError } : { state: "OK" },
+    extraction: toExtraction(i),
     createdAt: i.createdAt, updatedAt: i.updatedAt,
   };
 }
 
-export function createLiveClient(cfg: LiveConfig): FlareClient {
+export interface LiveClient extends FlareClient {
+  /** Disconnects and stops reconnecting. */
+  close(): void;
+}
+
+export function createLiveClient(cfg: LiveConfig): LiveClient {
+  const tokens = cfg.tokenStore ?? localTokenStore;
+  let closed = false;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
   const listeners = new Set<() => void>();
   let live: FlareConnection | null = null;
   let snapshot: Snapshot = {
@@ -55,12 +80,14 @@ export function createLiveClient(cfg: LiveConfig): FlareClient {
 
   let attempt = 0;
   const connect = () => {
+    if (closed) return;
     set({ connection: snapshot.incidents.length ? "disconnected" : "connecting" });
     connectFlare({
-      uri: cfg.uri, database: cfg.database, token: readToken(),
+      uri: cfg.uri, database: cfg.database, token: tokens.get(),
       onDisconnect: () => { live = null; set({ connection: "disconnected" }); scheduleRetry(); },
     }).then((c) => {
-      attempt = 0; live = c; writeToken(c.token);
+      if (closed) { c.conn.disconnect(); return; }
+      attempt = 0; live = c; tokens.set(c.token);
       const db = c.conn.db;
       for (const t of [db.incidentView, db.assignmentView, db.unitView, db.myRole]) {
         t.onInsert(refresh); t.onUpdate(refresh); t.onDelete(refresh);
@@ -72,7 +99,9 @@ export function createLiveClient(cfg: LiveConfig): FlareClient {
       scheduleRetry();
     });
   };
-  const scheduleRetry = () => setTimeout(connect, Math.min(1000 * 2 ** attempt++, 10000));
+  const scheduleRetry = () => {
+    if (!closed) retryTimer = setTimeout(connect, Math.min(1000 * 2 ** attempt++, 10000));
+  };
   connect();
 
   const run = async (op: (c: FlareConnection) => Promise<void>): Promise<OpResult> => {
@@ -94,5 +123,11 @@ export function createLiveClient(cfg: LiveConfig): FlareClient {
     confirmDispatchAndAssign: (req) => run((c) => confirmDispatchAndAssign(c.conn, req)),
     advanceAssignment: ({ assignmentId, next }) => run((c) => advanceAssignment(c.conn, { assignmentId, nextStatus: next })),
     resolveIncident: (req) => run((c) => resolveIncident(c.conn, req)),
+    close() {
+      closed = true;
+      clearTimeout(retryTimer);
+      live?.conn.disconnect();
+      live = null;
+    },
   };
 }
