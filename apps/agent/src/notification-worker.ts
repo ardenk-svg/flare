@@ -1,6 +1,6 @@
 import type { PendingNotification } from "@flare/contracts";
 
-import type { AgentDataPort } from "./data-port.js";
+import { toProviderRoute, type AgentDataPort } from "./data-port.js";
 import { sanitizeOperationalError, type OrchestratorLogger } from "./orchestrator.js";
 import { AgentStateStore } from "./state-store.js";
 import type { RouteSender } from "./types.js";
@@ -76,7 +76,8 @@ export class NotificationWorker {
     }
     if ((this.#retryAfter.get(job.id) ?? 0) > Date.now()) return;
 
-    const route = this.#state.routeFor(job.conversationKey);
+    // The database route survives a lost local state file; prefer the local copy when present.
+    const route = this.#state.routeFor(job.conversationKey) ?? (job.route ? toProviderRoute(job.route) : undefined);
     if (!route) {
       // Do not consume attempts: a later inbound message may restore the route.
       this.#logger.error("A pending notification is waiting for a durable Spectrum route.");
