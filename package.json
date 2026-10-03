@@ -1,0 +1,27 @@
+{
+  "name": "flare",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "npm@11.19.1",
+  "description": "A clearly labelled incident-response coordination simulation.",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "agent:terminal": "npm run dev:terminal --workspace @flare/agent",
+    "agent:imessage": "npm run dev:imessage --workspace @flare/agent",
+    "build": "npm run build --workspaces --if-present",
+    "check": "npm run typecheck && npm test && npm run build",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3"
+  }
+}
