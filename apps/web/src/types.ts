@@ -63,6 +63,11 @@ export interface Snapshot {
   connection: Connection;
   mode: "fixture" | "live";
   identity: Identity;
+  /** "no-role": connected but the backend has not granted this identity a dispatcher/responder role. */
+  access: "ok" | "no-role" | "unsupported-role";
+  identityHex?: string;
+  /** Present when the live connection failed before it could subscribe. */
+  connectError?: string;
   incidents: IncidentView[];
   units: Unit[];
   assignments: Assignment[];
@@ -71,7 +76,8 @@ export interface Snapshot {
 export type OpErrorCode =
   | "DISCONNECTED" | "FORBIDDEN" | "NOT_FOUND" | "NOT_READY" | "ALREADY_DISPATCHED"
   | "INVALID_SELECTION" | "UNIT_CONFLICT" | "INVALID_TRANSITION" | "NOT_COMPLETE";
-export type OpResult = { ok: true } | { ok: false; code: OpErrorCode; message: string };
+// Live reducers return their own CODE strings (UNIT_CONFLICT, UNAUTHORIZED, ...); keep them verbatim.
+export type OpResult = { ok: true } | { ok: false; code: OpErrorCode | (string & {}); message: string };
 
 export interface FlareClient {
   subscribe(listener: () => void): () => void;
