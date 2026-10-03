@@ -1,0 +1,38 @@
+{
+  "id": "count-contradiction",
+  "description": "Caller contradicts an earlier count; the new value replaces it.",
+  "covers": [
+    "contradiction",
+    "correction"
+  ],
+  "turn": {
+    "currentFacts": {
+      "incidentType": "injury",
+      "injuryReported": true,
+      "peopleInvolved": 2,
+      "locationText": "Main entrance of the demo engineering building"
+    },
+    "currentSummary": "Caller reports two injured people at the main entrance of the demo engineering building.",
+    "recentMessages": [
+      "Simulation: two people are hurt at the main entrance of the demo engineering building."
+    ],
+    "messages": [
+      "Sorry, it's only one person, not two."
+    ]
+  },
+  "expect": {
+    "intent": "CORRECTION",
+    "patch": {
+      "peopleInvolved": {
+        "is": 1
+      },
+      "injuryReported": "absent",
+      "locationText": "absent"
+    },
+    "corrections": {
+      "includes": [
+        "peopleInvolved"
+      ]
+    }
+  }
+}

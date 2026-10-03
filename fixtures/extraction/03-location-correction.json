@@ -1,0 +1,55 @@
+{
+  "id": "location-correction",
+  "description": "Demo step 4: correction replaces the location on the same record and keeps the building.",
+  "covers": [
+    "correction",
+    "demo fixture"
+  ],
+  "turn": {
+    "intakeRevision": 2,
+    "currentFacts": {
+      "incidentType": "smoke",
+      "fireOrSmoke": true,
+      "locationText": "North entrance of the demo student center"
+    },
+    "currentSummary": "Caller reports seeing smoke outside the north entrance of the demo student center.",
+    "recentMessages": [
+      "Simulation: I see smoke outside.",
+      "North entrance of the demo student center."
+    ],
+    "messages": [
+      "Correction: south entrance, not north."
+    ]
+  },
+  "expect": {
+    "intent": "CORRECTION",
+    "patch": {
+      "locationText": {
+        "contains": [
+          "south",
+          "student center"
+        ],
+        "notContains": [
+          "north"
+        ]
+      },
+      "fireOrSmoke": "absent"
+    },
+    "corrections": {
+      "includes": [
+        "locationText"
+      ]
+    },
+    "evidence": {
+      "locationText": "m1"
+    },
+    "recommendation": {
+      "services": [
+        "FIRE"
+      ],
+      "ruleIds": [
+        "DEMO_FIRE"
+      ]
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "id": "status-query",
+  "description": "Demo step 7: a status question must not change facts or start a report.",
+  "covers": [
+    "status request",
+    "demo fixture"
+  ],
+  "turn": {
+    "intakeRevision": 3,
+    "currentFacts": {
+      "incidentType": "smoke",
+      "fireOrSmoke": true,
+      "locationText": "South entrance of the demo student center"
+    },
+    "currentSummary": "Caller reports smoke outside the south entrance of the demo student center.",
+    "recentMessages": [
+      "Simulation: I see smoke outside.",
+      "North entrance of the demo student center.",
+      "Correction: south entrance, not north."
+    ],
+    "messages": [
+      "Any update?"
+    ]
+  },
+  "expect": {
+    "intent": "STATUS_QUERY",
+    "patchEmpty": true,
+    "question": {
+      "null": true
+    }
+  }
+}

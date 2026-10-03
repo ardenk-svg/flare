@@ -1,0 +1,46 @@
+{
+  "id": "retract-to-unknown",
+  "description": "Withdrawing an earlier claim clears it to null with evidence (not false).",
+  "covers": [
+    "correction",
+    "uncertainty",
+    "explicit clear"
+  ],
+  "turn": {
+    "currentFacts": {
+      "incidentType": "fire",
+      "fireOrSmoke": true,
+      "trappedPerson": true,
+      "locationText": "South entrance of the demo library"
+    },
+    "currentSummary": "Caller reports a fire at the south entrance of the demo library with someone trapped.",
+    "recentMessages": [
+      "Simulation: fire at the south entrance of the demo library, someone is trapped."
+    ],
+    "messages": [
+      "Actually I'm not sure anyone is trapped. I can't see inside from here."
+    ]
+  },
+  "expect": {
+    "patch": {
+      "trappedPerson": "cleared",
+      "fireOrSmoke": "absent"
+    },
+    "corrections": {
+      "includes": [
+        "trappedPerson"
+      ]
+    },
+    "evidence": {
+      "trappedPerson": "m1"
+    },
+    "recommendation": {
+      "services": [
+        "FIRE"
+      ],
+      "ruleIds": [
+        "DEMO_FIRE"
+      ]
+    }
+  }
+}

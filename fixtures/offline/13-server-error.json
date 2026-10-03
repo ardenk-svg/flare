@@ -1,0 +1,25 @@
+{
+  "id": "server-error",
+  "description": "HTTP 503 maps to retryable PROVIDER_ERROR.",
+  "covers": [
+    "API failure"
+  ],
+  "turn": {
+    "currentFacts": {
+      "incidentType": "smoke",
+      "fireOrSmoke": true,
+      "locationText": "North entrance of the demo student center"
+    },
+    "currentSummary": "Caller reports smoke at the north entrance of the demo student center.",
+    "messages": [
+      "Correction: south entrance, not north."
+    ]
+  },
+  "model": {
+    "throwStatus": 503
+  },
+  "expect": {
+    "errorCode": "PROVIDER_ERROR",
+    "retryable": true
+  }
+}

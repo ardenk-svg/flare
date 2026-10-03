@@ -1,0 +1,37 @@
+{
+  "id": "status-with-patch",
+  "description": "STATUS_QUERY output that tries to change facts is rejected.",
+  "covers": [
+    "status request"
+  ],
+  "turn": {
+    "currentFacts": {
+      "incidentType": "smoke",
+      "fireOrSmoke": true,
+      "locationText": "North entrance of the demo student center"
+    },
+    "currentSummary": "Caller reports smoke at the north entrance of the demo student center.",
+    "messages": [
+      "Any update? smoke"
+    ]
+  },
+  "model": {
+    "output": {
+      "intent": "STATUS_QUERY",
+      "changes": [
+        {
+          "field": "trappedPerson",
+          "kind": "TRUE",
+          "messageId": "m1",
+          "quote": "Any update?"
+        }
+      ],
+      "summary": "",
+      "unresolvedFields": [],
+      "proposedQuestion": ""
+    }
+  },
+  "expect": {
+    "errorCode": "INVALID_OUTPUT"
+  }
+}

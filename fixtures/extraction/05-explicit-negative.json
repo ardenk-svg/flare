@@ -1,0 +1,38 @@
+{
+  "id": "explicit-negative",
+  "description": "An explicit denial produces false, distinct from unknown.",
+  "covers": [
+    "explicit negative"
+  ],
+  "turn": {
+    "messages": [
+      "Simulation: there's smoke coming from a dumpster behind the demo dorm, west entrance. Nobody is hurt."
+    ]
+  },
+  "expect": {
+    "intent": "REPORT",
+    "patch": {
+      "fireOrSmoke": {
+        "is": true
+      },
+      "injuryReported": {
+        "is": false
+      },
+      "locationText": {
+        "contains": [
+          "west",
+          "dorm"
+        ]
+      },
+      "trappedPerson": "unknown"
+    },
+    "recommendation": {
+      "services": [
+        "FIRE"
+      ],
+      "ruleIds": [
+        "DEMO_FIRE"
+      ]
+    }
+  }
+}

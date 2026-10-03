@@ -1,0 +1,38 @@
+{
+  "id": "fabricated-quote",
+  "description": "A plausible quote that the caller never wrote is rejected.",
+  "covers": [
+    "unsupported evidence"
+  ],
+  "turn": {
+    "currentFacts": {
+      "incidentType": "smoke",
+      "fireOrSmoke": true,
+      "locationText": "North entrance of the demo student center"
+    },
+    "currentSummary": "Caller reports smoke at the north entrance of the demo student center.",
+    "messages": [
+      "Correction: south entrance, not north."
+    ]
+  },
+  "model": {
+    "output": {
+      "intent": "CORRECTION",
+      "changes": [
+        {
+          "field": "locationText",
+          "kind": "TEXT",
+          "text": "South entrance of the demo student center",
+          "messageId": "m1",
+          "quote": "I'm at the south entrance"
+        }
+      ],
+      "summary": "Caller reports smoke at the south entrance of the demo student center.",
+      "unresolvedFields": [],
+      "proposedQuestion": ""
+    }
+  },
+  "expect": {
+    "errorCode": "INVALID_OUTPUT"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "id": "explicit-not-breathing",
+  "description": "Explicit negatives for consciousness and breathing trigger the EMS demo rules.",
+  "covers": [
+    "explicit negative",
+    "rules"
+  ],
+  "turn": {
+    "messages": [
+      "Simulation: a man is unconscious and not breathing at the west entrance of the demo library."
+    ]
+  },
+  "expect": {
+    "intent": "REPORT",
+    "patch": {
+      "callerReportedConscious": {
+        "is": false
+      },
+      "callerReportedBreathing": {
+        "is": false
+      },
+      "locationText": {
+        "contains": [
+          "west",
+          "library"
+        ]
+      },
+      "fireOrSmoke": "unknown"
+    },
+    "recommendation": {
+      "services": [
+        "EMS"
+      ],
+      "ruleIds": [
+        "DEMO_CONSCIOUS",
+        "DEMO_BREATHING"
+      ]
+    }
+  }
+}

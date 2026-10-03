@@ -1,0 +1,16 @@
+{
+  "id": "greeting-other",
+  "description": "A greeting creates no facts.",
+  "covers": [
+    "other intent"
+  ],
+  "turn": {
+    "messages": [
+      "hi, is this the flare demo line?"
+    ]
+  },
+  "expect": {
+    "intent": "OTHER",
+    "patchEmpty": true
+  }
+}

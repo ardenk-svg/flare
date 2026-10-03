@@ -1,0 +1,25 @@
+{
+  "id": "vague-consciousness",
+  "description": "Vague wording must not be turned into a consciousness or breathing claim.",
+  "covers": [
+    "uncertainty",
+    "no medical inference"
+  ],
+  "turn": {
+    "messages": [
+      "Simulation: my friend collapsed in the demo gym lobby and isn't really responding much."
+    ]
+  },
+  "expect": {
+    "intent": "REPORT",
+    "patch": {
+      "callerReportedConscious": "unknown",
+      "callerReportedBreathing": "unknown",
+      "locationText": {
+        "contains": [
+          "gym"
+        ]
+      }
+    }
+  }
+}

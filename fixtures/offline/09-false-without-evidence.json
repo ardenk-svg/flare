@@ -1,0 +1,38 @@
+{
+  "id": "false-without-evidence",
+  "description": "Changing a fact to false without a supporting quote is rejected.",
+  "covers": [
+    "unsupported evidence",
+    "explicit negative"
+  ],
+  "turn": {
+    "messages": [
+      "Simulation: smoke outside the demo gym"
+    ]
+  },
+  "model": {
+    "output": {
+      "intent": "REPORT",
+      "changes": [
+        {
+          "field": "fireOrSmoke",
+          "kind": "TRUE",
+          "messageId": "m1",
+          "quote": "smoke outside"
+        },
+        {
+          "field": "injuryReported",
+          "kind": "FALSE",
+          "messageId": "m1",
+          "quote": "nobody is hurt"
+        }
+      ],
+      "summary": "Caller reports smoke.",
+      "unresolvedFields": [],
+      "proposedQuestion": ""
+    }
+  },
+  "expect": {
+    "errorCode": "INVALID_OUTPUT"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "id": "kind-type-mismatch",
+  "description": "A boolean field given a TEXT value is rejected (no coercion).",
+  "covers": [
+    "malformed output"
+  ],
+  "turn": {
+    "messages": [
+      "Simulation: smoke outside the demo gym"
+    ]
+  },
+  "model": {
+    "output": {
+      "intent": "REPORT",
+      "changes": [
+        {
+          "field": "fireOrSmoke",
+          "kind": "TEXT",
+          "text": "yes",
+          "messageId": "m1",
+          "quote": "smoke"
+        }
+      ],
+      "summary": "Caller reports smoke.",
+      "unresolvedFields": [],
+      "proposedQuestion": ""
+    }
+  },
+  "expect": {
+    "errorCode": "INVALID_OUTPUT"
+  }
+}

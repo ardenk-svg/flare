@@ -1,0 +1,39 @@
+{
+  "id": "smoke-report",
+  "description": "Demo step 1: first partial report, no location yet.",
+  "covers": [
+    "incomplete report",
+    "demo fixture"
+  ],
+  "turn": {
+    "messages": [
+      "Simulation: I see smoke outside."
+    ]
+  },
+  "expect": {
+    "intent": "REPORT",
+    "patch": {
+      "fireOrSmoke": {
+        "is": true
+      },
+      "locationText": "absent",
+      "trappedPerson": "unknown",
+      "injuryReported": "unknown",
+      "violentThreat": "unknown",
+      "callerReportedConscious": "unknown",
+      "callerReportedBreathing": "unknown",
+      "peopleInvolved": "unknown"
+    },
+    "question": {
+      "match": "build|entrance|where|location"
+    },
+    "recommendation": {
+      "services": [
+        "FIRE"
+      ],
+      "ruleIds": [
+        "DEMO_FIRE"
+      ]
+    }
+  }
+}

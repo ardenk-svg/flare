@@ -1,0 +1,32 @@
+{
+  "id": "multi-message-batch",
+  "description": "Two queued messages in one turn; evidence must cite the right message for each fact.",
+  "covers": [
+    "batch",
+    "evidence"
+  ],
+  "turn": {
+    "messages": [
+      "Simulation: smoke is coming out of the vents",
+      "im at the demo engineering building, main entrance"
+    ]
+  },
+  "expect": {
+    "intent": "REPORT",
+    "patch": {
+      "fireOrSmoke": {
+        "is": true
+      },
+      "locationText": {
+        "contains": [
+          "engineering",
+          "main entrance"
+        ]
+      }
+    },
+    "evidence": {
+      "fireOrSmoke": "m1",
+      "locationText": "m2"
+    }
+  }
+}

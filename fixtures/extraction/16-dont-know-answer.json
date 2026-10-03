@@ -1,0 +1,33 @@
+{
+  "id": "dont-know-answer",
+  "description": "\"I don't know\" answers the last question: no false, no repeated question.",
+  "covers": [
+    "uncertainty",
+    "question quality"
+  ],
+  "turn": {
+    "currentFacts": {
+      "incidentType": "smoke",
+      "fireOrSmoke": true,
+      "locationText": "South entrance of the demo student center"
+    },
+    "currentSummary": "Caller reports smoke at the south entrance of the demo student center.",
+    "lastQuestion": "Is anyone injured?",
+    "messages": [
+      "I don't know"
+    ]
+  },
+  "expect": {
+    "patch": {
+      "injuryReported": "unknown"
+    },
+    "unresolved": {
+      "includes": [
+        "injuryReported"
+      ]
+    },
+    "question": {
+      "notMatch": "injur|hurt"
+    }
+  }
+}
