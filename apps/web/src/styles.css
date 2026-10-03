@@ -17,3 +17,13 @@ body { margin: 0; }
 .notice { background: #e0e7ff; padding: 8px; border-radius: 6px; } .notice.err { background: #fecaca; }
 .steps button { margin-right: 8px; padding: 8px 14px; }
 .unit { display: block; margin: 4px 0; }
+button { min-height: 44px; padding: 0 14px; cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+:focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
+.stale { opacity: .6; }
+.pill.ident { background: #dbeafe; }
+.steps button.done { background: #bbf7d0; }
+fieldset.card { border: 1px solid #ddd; }
+.inline { margin-right: 12px; } .unit { display: block; margin: 6px 0; }
+.dev { border-style: dashed; } .dev-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.assign { padding-left: 18px; }

@@ -1,6 +1,9 @@
-import { assignments, incidents } from "../fixture";
-import { ConnectionStatus, FactsTable, LocationCard, SimBanner } from "../components";
-import type { AssignmentStatus } from "../types";
+import { useClient, useSnapshot } from "../data";
+import {
+  ActionError, ConnectionStatus, ExtractionState, FactsTable, FixtureControls, IdentityBadge,
+  LocationCard, SimBanner, StaleBanner, useAction,
+} from "../components";
+import { ASSIGNMENT_ORDER, type AssignmentStatus } from "../types";
 
 const STEPS: { label: string; reaches: AssignmentStatus }[] = [
   { label: "Accept", reaches: "ACCEPTED" },
@@ -10,9 +13,12 @@ const STEPS: { label: string; reaches: AssignmentStatus }[] = [
 ];
 
 export default function Responder() {
-  // Fixture: pretend this identity is FIRE-01's responder.
-  const unitId = "FIRE-01";
-  const assignment = assignments.find((a) => a.unitId === unitId);
+  const client = useClient();
+  const { identity, assignments, incidents, connection } = useSnapshot();
+  const act = useAction();
+  const offline = connection !== "connected";
+  const assignment = assignments.find((a) => a.unitId === identity.unitId && a.status !== "COMPLETED")
+    ?? assignments.find((a) => a.unitId === identity.unitId);
   const incident = incidents.find((i) => i.id === assignment?.incidentId);
 
   return (
@@ -20,23 +26,44 @@ export default function Responder() {
       <SimBanner />
       <header className="bar">
         <h1>Responder</h1>
-        <span className="pill">Mock unit {unitId}</span>
-        <ConnectionStatus state="fixture" />
+        <IdentityBadge />
+        <ConnectionStatus />
       </header>
+      <StaleBanner />
       {!assignment || !incident ? (
-        <p className="muted">No assignment for {unitId} yet. Waiting for simulated dispatch.</p>
+        <p className="muted">No assignment for {identity.unitId} yet. Waiting for simulated dispatch.</p>
       ) : (
-        <main>
-          <h2>{incident.id} <span className="pill">incident: {incident.status}</span></h2>
-          <p>Assignment stage: <span className="pill">{assignment.status}</span></p>
+        <main className={offline ? "stale" : ""}>
+          <h2>{incident.id}</h2>
+          <p>
+            Incident: <span className="pill">{incident.status}</span>{" "}
+            Your assignment: <span className="pill">{assignment.status}</span>
+          </p>
+          {incident.needsReview && <div className="notice err">Caller facts changed after dispatch. Dispatcher has been flagged to review.</div>}
+          <ExtractionState incident={incident} />
           <p>{incident.summary}</p>
           <LocationCard text={incident.facts.locationText} />
           <FactsTable facts={incident.facts} evidence={[]} corrections={incident.corrections} />
-          <div className="steps">
-            {STEPS.map((s) => <button key={s.label} disabled>{s.label}</button>)}
+          <div className="steps" role="group" aria-label="Assignment progress">
+            {STEPS.map((s) => {
+              const cur = ASSIGNMENT_ORDER.indexOf(assignment.status);
+              const idx = ASSIGNMENT_ORDER.indexOf(s.reaches);
+              const done = idx <= cur;
+              const isNext = idx === cur + 1;
+              return (
+                <button key={s.label} className={done ? "done" : ""}
+                  disabled={!isNext || offline || act.pending}
+                  onClick={() => act.run(() => client.advanceAssignment({ assignmentId: assignment.id, next: s.reaches }))}>
+                  {done ? "✓ " : ""}{s.label}
+                </button>
+              );
+            })}
           </div>
+          {act.pending && <div className="muted">Waiting for the backend to confirm…</div>}
+          <ActionError message={act.error} />
         </main>
       )}
+      <FixtureControls incidentId={incident?.id ?? null} />
     </div>
   );
 }

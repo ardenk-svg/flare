@@ -53,3 +53,32 @@ export interface IncidentView {
   createdAt: string;
   updatedAt: string;
 }
+
+// ---- Client-facing shapes (app-level, not from the contract; swap with Person 3's adapter) ----
+export type Role = "dispatcher" | "responder";
+export interface Identity { role: Role; unitId?: string }
+export type Connection = "connecting" | "connected" | "disconnected";
+
+export interface Snapshot {
+  connection: Connection;
+  mode: "fixture" | "live";
+  identity: Identity;
+  incidents: IncidentView[];
+  units: Unit[];
+  assignments: Assignment[];
+}
+
+export type OpErrorCode =
+  | "DISCONNECTED" | "FORBIDDEN" | "NOT_FOUND" | "NOT_READY" | "ALREADY_DISPATCHED"
+  | "INVALID_SELECTION" | "UNIT_CONFLICT" | "INVALID_TRANSITION" | "NOT_COMPLETE";
+export type OpResult = { ok: true } | { ok: false; code: OpErrorCode; message: string };
+
+export interface FlareClient {
+  subscribe(listener: () => void): () => void;
+  getSnapshot(): Snapshot;
+  confirmDispatchAndAssign(req: { incidentId: string; confirmedServices: Service[]; unitIds: string[] }): Promise<OpResult>;
+  advanceAssignment(req: { assignmentId: string; next: AssignmentStatus }): Promise<OpResult>;
+  resolveIncident(req: { incidentId: string }): Promise<OpResult>;
+}
+
+export const ASSIGNMENT_ORDER: AssignmentStatus[] = ["OFFERED", "ACCEPTED", "EN_ROUTE", "ON_SCENE", "COMPLETED"];
