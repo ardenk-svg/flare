@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "publish:local": "spacetime publish --server local --module-path . ${FLARE_DB:-flare-dev} --yes",
     "generate": "spacetime generate --lang typescript --out-dir ../packages/data/src/bindings --module-path . --yes",
-    "reset:local": "spacetime call --server local ${FLARE_DB:-flare-dev} reset_demo"
+    "reset:local": "spacetime call --server local ${FLARE_DB:-flare-dev} reset_demo",
+    "publish:shared": "spacetime publish --server maincloud --module-path . ${FLARE_DB:?set FLARE_DB to the agreed shared database name}"
   },
   "dependencies": {
     "spacetimedb": "2.10.2"

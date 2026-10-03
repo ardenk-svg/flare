@@ -13,6 +13,7 @@ import {
   getMyRole,
   listAssignments,
   listIncidents,
+  listPendingConversationContexts,
   listPendingNotifications,
   listUnits,
   recordExtractionFailure,
@@ -65,6 +66,7 @@ async function client(role?: string, unitId?: string): Promise<FlareConnection> 
   return c;
 }
 
+const route = (key: string) => ({ platform: 'check', spaceId: `space-${key}`, line: 'check-line' });
 const msg = (id: string, text: string) => ({ id, text, receivedAt: new Date().toISOString() });
 
 function result(intent: Intent, patch: CallerFactPatch, evidence: Evidence[], summary: string): ExtractionResult {
@@ -93,9 +95,9 @@ async function main() {
   const KEY = 'check:conversation-1';
 
   // --- Intake: receive, duplicate, failure, first report ---
-  let ctx = await recordInbound(A, { provider: 'check', conversationKey: KEY, messages: [msg('m1', 'Simulation: I see smoke outside.')] });
+  let ctx = await recordInbound(A, { provider: 'check', conversationKey: KEY, route: route(KEY), messages: [msg('m1', 'Simulation: I see smoke outside.')] });
   check('recordInbound stores RECEIVED message', ctx.pendingMessages.length === 1 && ctx.activeIncident === null);
-  ctx = await recordInbound(A, { provider: 'check', conversationKey: KEY, messages: [msg('m1', 'Simulation: I see smoke outside.')] });
+  ctx = await recordInbound(A, { provider: 'check', conversationKey: KEY, route: route(KEY), messages: [msg('m1', 'Simulation: I see smoke outside.')] });
   check('duplicate source ID is a no-op', ctx.pendingMessages.length === 1);
 
   await recordExtractionFailure(A, {
@@ -134,15 +136,22 @@ async function main() {
   check('sent question persisted', getConversationContext(A, KEY)!.lastQuestion === 'Which building and entrance?');
 
   // --- Location, then correction with stale-result protection ---
-  await recordInbound(A, { provider: 'check', conversationKey: KEY, messages: [msg('m2', 'North entrance of the demo student center.')] });
+  check('incident extraction state OK after accepted patch', getConversationContext(A, KEY)!.activeIncident?.extractionState === 'OK');
+  await recordInbound(A, { provider: 'check', conversationKey: KEY, route: route(KEY), messages: [msg('m2', 'North entrance of the demo student center.')] });
+  check('new input on active incident sets PENDING', getConversationContext(A, KEY)!.activeIncident?.extractionState === 'PENDING');
+  await recordExtractionFailure(A, { conversationKey: KEY, messageIds: ['m2'], error: { code: 'RATE_LIMIT', message: 'retry later', retryable: true } });
+  ctx = getConversationContext(A, KEY)!;
+  check('PENDING -> FAILED keeps verified facts and revision', ctx.activeIncident?.extractionState === 'FAILED' && ctx.activeIncident.extractionError?.startsWith('RATE_LIMIT') === true && ctx.activeIncident.facts.fireOrSmoke === true && ctx.intakeRevision === 1 && ctx.pendingMessages.length === 1);
   await applyIntakePatch(A, {
     conversationKey: KEY, expectedRevision: 1, sourceMessageIds: ['m2'],
     result: result('REPORT', { locationText: 'North entrance of the demo student center' }, [{ field: 'locationText', messageId: 'm2', quote: 'North entrance of the demo student center' }], 'Smoke outside the north entrance of the demo student center.'),
     recommendation: FIRE_REC,
   });
-  check('location makes incident READY_FOR_REVIEW', getConversationContext(A, KEY)!.activeIncident?.status === 'READY_FOR_REVIEW');
+  ctx = getConversationContext(A, KEY)!;
+  check('location makes incident READY_FOR_REVIEW', ctx.activeIncident?.status === 'READY_FOR_REVIEW');
+  check('successful retry returns FAILED -> OK and clears error', ctx.activeIncident?.extractionState === 'OK' && ctx.activeIncident.extractionError === null && ctx.activeIncident.facts.fireOrSmoke === true);
 
-  await recordInbound(A, { provider: 'check', conversationKey: KEY, messages: [msg('m3', 'Correction: south entrance, not north.')] });
+  await recordInbound(A, { provider: 'check', conversationKey: KEY, route: route(KEY), messages: [msg('m3', 'Correction: south entrance, not north.')] });
   const correction = result('CORRECTION', { locationText: 'south entrance' }, [{ field: 'locationText', messageId: 'm3', quote: 'south entrance' }], 'Smoke outside the south entrance of the demo student center.');
   await rejects('stale expected revision is rejected', applyIntakePatch(A, { conversationKey: KEY, expectedRevision: 1, sourceMessageIds: ['m3'], result: correction, recommendation: FIRE_REC }), 'STALE_REVISION');
   check('stale rejection leaves message RECEIVED', getConversationContext(A, KEY)!.pendingMessages.some(m => m.id === 'm3'));
@@ -154,8 +163,9 @@ async function main() {
   // --- Authorization ---
   await rejects('outsider cannot dispatch', confirmDispatchAndAssign(outsider.conn, { incidentId: inc.id, confirmedServices: ['FIRE'], unitIds: ['FIRE-01'] }), 'UNAUTHORIZED');
   await rejects('responder cannot dispatch', confirmDispatchAndAssign(fire.conn, { incidentId: inc.id, confirmedServices: ['FIRE'], unitIds: ['FIRE-01'] }), 'UNAUTHORIZED');
-  await rejects('dispatcher cannot write intake', recordInbound(dispatcher.conn, { provider: 'check', conversationKey: KEY, messages: [msg('x', 'x')] }), 'UNAUTHORIZED');
+  await rejects('dispatcher cannot write intake', recordInbound(dispatcher.conn, { provider: 'check', conversationKey: KEY, route: route(KEY), messages: [msg('x', 'x')] }), 'UNAUTHORIZED');
   check('outsider sees no incidents, units, or agent context', listIncidents(outsider.conn).length === 0 && listUnits(outsider.conn).length === 0 && [...outsider.conn.db.agentInbound.iter()].length === 0);
+  check('context and notifications carry the durable route', getConversationContext(A, KEY)!.route.spaceId === `space-${KEY}` && getConversationContext(A, KEY)!.route.line === 'check-line');
   check('dispatcher cannot read raw caller messages', [...dispatcher.conn.db.agentInbound.iter()].length === 0 && [...dispatcher.conn.db.agentConversation.iter()].length === 0);
 
   // --- Dispatch ---
@@ -182,14 +192,14 @@ async function main() {
   check('EN_ROUTE notification queued with event status', listPendingNotifications(A).find(n => n.kind === 'ASSIGNMENT_EN_ROUTE')?.eventAssignmentStatus === 'EN_ROUTE');
 
   // --- Status query, post-dispatch correction ---
-  await recordInbound(A, { provider: 'check', conversationKey: KEY, messages: [msg('m4', 'Any update?')] });
+  await recordInbound(A, { provider: 'check', conversationKey: KEY, route: route(KEY), messages: [msg('m4', 'Any update?')] });
   await completeInboundWithoutPatch(A, { conversationKey: KEY, messageIds: ['m4'], intent: 'STATUS_QUERY', replyText: '[SIMULATION] Mock unit FIRE-01 is en route.' });
   ctx = getConversationContext(A, KEY)!;
   check('status query APPLIED without revision change or new incident', ctx.pendingMessages.length === 0 && ctx.intakeRevision === 3 && listIncidents(A).length === 1);
   await completeInboundWithoutPatch(A, { conversationKey: KEY, messageIds: ['m4'], intent: 'STATUS_QUERY', replyText: 'dup' });
   check('duplicate status completion queues no second reply', listPendingNotifications(A).filter(n => n.kind === 'INFO_REPLY').length === 1);
 
-  await recordInbound(A, { provider: 'check', conversationKey: KEY, messages: [msg('m5', 'Someone may be trapped inside.')] });
+  await recordInbound(A, { provider: 'check', conversationKey: KEY, route: route(KEY), messages: [msg('m5', 'Someone may be trapped inside.')] });
   await applyIntakePatch(A, {
     conversationKey: KEY, expectedRevision: 3, sourceMessageIds: ['m5'],
     result: result('REPORT', { trappedPerson: true }, [{ field: 'trappedPerson', messageId: 'm5', quote: 'Someone may be trapped inside' }], 'Smoke at the south entrance; caller says someone may be trapped.'),
@@ -212,13 +222,33 @@ async function main() {
   await waitFor('dispatcher sees COMPLETED', () => listAssignments(dispatcher.conn).find(a => a.id === fireAssign.id)?.status === 'COMPLETED');
   check('completed assignment releases unit', listUnits(dispatcher.conn).find(u => u.id === 'FIRE-01')?.status === 'AVAILABLE');
   check('completing assignment does not resolve incident', listIncidents(dispatcher.conn).find(i => i.id === inc.id)?.status === 'DISPATCHED');
+  await recordInbound(A, { provider: 'check', conversationKey: KEY, route: route(KEY), messages: [msg('m6', 'Old case message that never got processed.')] });
   await resolveIncident(dispatcher.conn, { incidentId: inc.id });
   await waitFor('agent sees resolution', () => getConversationContext(A, KEY)!.activeIncident === null);
   check('resolve sets RESOLVED and ends active association', listIncidents(dispatcher.conn).find(i => i.id === inc.id)?.status === 'RESOLVED');
 
+  // --- Case B in the same conversation ---
+  ctx = getConversationContext(A, KEY)!;
+  check('resolve advances the case and clears the question', ctx.caseEpoch === 2 && ctx.lastQuestion === null && ctx.lastQuestionDelivery === null);
+  check('old-case pending input is excluded from the new case', ctx.pendingMessages.length === 0 && ctx.recentMessages.length === 0 && !listPendingConversationContexts(A).some(c => c.conversationKey === KEY));
+  await recordInbound(A, { provider: 'check', conversationKey: KEY, route: route(KEY), messages: [msg('b1', 'Simulation: someone collapsed in the demo gym lobby.')] });
+  ctx = getConversationContext(A, KEY)!;
+  check('case B starts with empty facts, summary, revision, and only its own messages', ctx.activeIncident === null && ctx.intakeRevision === 0 && ctx.currentSummary === '' && Object.values(ctx.currentFacts).every(v => v === null) && ctx.pendingMessages.map(m => m.id).join() === 'b1' && ctx.recentMessages.length === 0);
+  await rejects('old-case message cannot be applied to the new case', applyIntakePatch(A, { conversationKey: KEY, expectedRevision: 0, sourceMessageIds: ['m6'], result: result('REPORT', {}, [], 'x'), recommendation: FIRE_REC }), 'STALE_CASE');
+  await rejects('old-case evidence is rejected', applyIntakePatch(A, { conversationKey: KEY, expectedRevision: 0, sourceMessageIds: ['b1'], result: result('REPORT', { fireOrSmoke: true }, [{ field: 'fireOrSmoke', messageId: 'm1', quote: 'I see smoke outside' }], 'x'), recommendation: FIRE_REC }), 'UNKNOWN_EVIDENCE_MESSAGE');
+  await applyIntakePatch(A, {
+    conversationKey: KEY, expectedRevision: 0, sourceMessageIds: ['b1'],
+    result: result('REPORT', { locationText: 'demo gym lobby' }, [{ field: 'locationText', messageId: 'b1', quote: 'demo gym lobby' }], 'Someone collapsed in the demo gym lobby.'),
+    recommendation: { services: [], ruleIds: [], reason: 'No demo rule matched; dispatcher review required.' },
+  });
+  const caseB = getConversationContext(A, KEY)!.activeIncident!;
+  check('case B creates a separate incident without case-A facts', caseB.id !== inc1.id && caseB.caseEpoch === 2 && caseB.facts.fireOrSmoke === null && caseB.facts.trappedPerson === null && caseB.evidence.every(e => e.messageId === 'b1'));
+  await waitFor('dispatcher sees case B', () => listIncidents(dispatcher.conn).some(i => i.id === caseB.id));
+  check('case A history remains stored', listIncidents(dispatcher.conn).find(i => i.id === inc1.id)?.status === 'RESOLVED');
+
   // --- Trapped-person fixture: unknown vs false, independent assignments ---
   const KEY2 = 'check:conversation-2';
-  await recordInbound(A, { provider: 'check', conversationKey: KEY2, messages: [msg('t1', 'Simulation: a person is trapped in the demo garage, level 2. Nobody is threatening anyone. Not sure if anyone is hurt.')] });
+  await recordInbound(A, { provider: 'check', conversationKey: KEY2, route: route(KEY2), messages: [msg('t1', 'Simulation: a person is trapped in the demo garage, level 2. Nobody is threatening anyone. Not sure if anyone is hurt.')] });
   await applyIntakePatch(A, {
     conversationKey: KEY2, expectedRevision: 0, sourceMessageIds: ['t1'],
     result: result('REPORT', { trappedPerson: true, locationText: 'demo garage, level 2', violentThreat: false, injuryReported: null }, [
@@ -244,7 +274,7 @@ async function main() {
   // --- Concurrent reservation of one unit ---
   const ready: string[] = [];
   for (const k of ['check:conversation-3', 'check:conversation-4']) {
-    await recordInbound(A, { provider: 'check', conversationKey: k, messages: [msg('p1', 'Simulation: a person is threatening people at the demo library entrance.')] });
+    await recordInbound(A, { provider: 'check', conversationKey: k, route: route(k), messages: [msg('p1', 'Simulation: a person is threatening people at the demo library entrance.')] });
     await applyIntakePatch(A, {
       conversationKey: k, expectedRevision: 0, sourceMessageIds: ['p1'],
       result: result('REPORT', { violentThreat: true, locationText: 'demo library entrance' }, [
@@ -266,12 +296,23 @@ async function main() {
   check('loser receives explicit UNIT_CONFLICT', conflict?.reason instanceof FlareOpError && conflict.reason.code === 'UNIT_CONFLICT');
   check('losing incident unchanged', listIncidents(dispatcher.conn).filter(i => ready.includes(i.id) && i.status === 'READY_FOR_REVIEW').length === 1);
 
-  // --- Reconnect with the same identity ---
+  // --- Route privacy ---
+  const visible = (c: FlareConnection) =>
+    JSON.stringify([...c.conn.db.incidentView.iter(), ...c.conn.db.assignmentView.iter(), ...c.conn.db.unitView.iter(), ...c.conn.db.myRole.iter(), ...c.conn.db.agentConversation.iter(), ...c.conn.db.agentInbound.iter(), ...c.conn.db.agentNotification.iter()], (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
+  check('route fields invisible to dispatcher and responder', [dispatcher, fire, ems, outsider].every(c => !visible(c).includes('space-check') && !visible(c).includes('check-line')));
+
+  // --- Restart recovery: pending intake and unacknowledged notifications ---
+  await recordInbound(A, { provider: 'check', conversationKey: KEY2, route: route(KEY2), messages: [msg('t2', 'Still waiting here.')] });
   const before = getConversationContext(A, KEY2);
+  const pendingJobsBefore = listPendingNotifications(A).map(n => n.id).join();
   A.disconnect();
   const again = await connectFlare({ uri: URI, database: DB, token: agent.token });
   const after = getConversationContext(again.conn, KEY2);
   check('reconnect restores identity and committed context', again.identityHex === agent.identityHex && JSON.stringify(before) === JSON.stringify(after));
+  const pendingContexts = listPendingConversationContexts(again.conn);
+  check('reconnect enumerates pending intake with route', pendingContexts.some(c => c.conversationKey === KEY2 && c.pendingMessages.some(m => m.id === 't2') && c.route.spaceId === `space-${KEY2}`));
+  const jobs = listPendingNotifications(again.conn);
+  check('reconnect enumerates unacknowledged notifications with route', jobs.length > 0 && jobs.map(n => n.id).join() === pendingJobsBefore && jobs.every(n => n.route.spaceId.startsWith('space-check')));
 
   for (const c of [again, dispatcher, dispatcher2, fire, ems, outsider]) c.conn.disconnect();
   console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) failed.`);

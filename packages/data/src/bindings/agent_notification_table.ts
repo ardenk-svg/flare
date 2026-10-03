@@ -13,6 +13,9 @@ import {
 export default __t.row({
   id: __t.u64().primaryKey(),
   conversationKey: __t.string().name("conversation_key"),
+  routePlatform: __t.string().name("route_platform"),
+  routeSpaceId: __t.string().name("route_space_id"),
+  routeLine: __t.option(__t.string()).name("route_line"),
   incidentId: __t.option(__t.u64()).name("incident_id"),
   assignmentId: __t.option(__t.u64()).name("assignment_id"),
   kind: __t.string(),

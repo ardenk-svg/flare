@@ -35,6 +35,8 @@ export default __t.row({
   status: __t.string(),
   needsReview: __t.bool().name("needs_review"),
   extractionError: __t.option(__t.string()).name("extraction_error"),
+  extractionState: __t.string().name("extraction_state"),
+  caseEpoch: __t.u32().name("case_epoch"),
   createdAt: __t.timestamp().name("created_at"),
   updatedAt: __t.timestamp().name("updated_at"),
 });

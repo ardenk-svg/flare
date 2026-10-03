@@ -11,6 +11,8 @@ import {
   type CallerFacts,
   type CallerMessage,
   type ConversationContext,
+  type ConversationRoute,
+  type ExtractionState,
   type ExtractionOutcome,
   type ExtractionResult,
   type Incident,
@@ -96,7 +98,9 @@ export function toIncident(row: IncidentRow): Incident {
     confirmedServices: row.confirmedServices as Service[],
     status: row.status as IncidentStatus,
     needsReview: row.needsReview,
+    extractionState: row.extractionState as ExtractionState,
     extractionError: nul(row.extractionError),
+    caseEpoch: row.caseEpoch,
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
   };
@@ -118,10 +122,17 @@ export function toUnit(row: UnitRow): Unit {
   return { id: row.id, service: row.service as Service, status: row.status as UnitStatus };
 }
 
+const toRoute = (row: { routePlatform: string; routeSpaceId: string; routeLine: string | undefined }): ConversationRoute => ({
+  platform: row.routePlatform,
+  spaceId: row.routeSpaceId,
+  line: nul(row.routeLine),
+});
+
 export function toPendingNotification(row: NotificationRow): PendingNotification {
   return {
     id: toId(row.id),
     conversationKey: row.conversationKey,
+    route: toRoute(row),
     incidentId: row.incidentId === undefined ? null : toId(row.incidentId),
     assignmentId: row.assignmentId === undefined ? null : toId(row.assignmentId),
     kind: row.kind as NotificationKind,
@@ -189,17 +200,26 @@ export const listUnits = (conn: DbConnection): Unit[] =>
 
 const RECENT_LIMIT = 10;
 
-/** Committed context for one conversation, or null if no message was ever recorded for it. */
+type ConversationRow = ReturnType<DbConnection['db']['agentConversation']['iter']> extends Iterable<infer R> ? R : never;
+
+/**
+ * Committed context for the conversation's current intake case, or null if no message was ever
+ * recorded for it. Messages and the last question from earlier (resolved) cases are excluded.
+ */
 export function getConversationContext(conn: DbConnection, conversationKey: string): ConversationContext | null {
   const convo = [...conn.db.agentConversation.iter()].find(c => c.conversationKey === conversationKey);
-  if (!convo) return null;
+  return convo ? contextFor(conn, convo) : null;
+}
+
+function contextFor(conn: DbConnection, convo: ConversationRow): ConversationContext {
+  const conversationKey = convo.conversationKey;
   const incidentRow =
     convo.activeIncidentId === undefined
       ? undefined
       : [...conn.db.incidentView.iter()].find(i => i.id === convo.activeIncidentId);
   const activeIncident = incidentRow ? toIncident(incidentRow) : null;
   const rows = [...conn.db.agentInbound.iter()]
-    .filter(m => m.conversationId === convo.id)
+    .filter(m => m.conversationId === convo.id && m.caseEpoch === convo.caseEpoch)
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const asMessage = (m: (typeof rows)[number]): CallerMessage => ({
     id: m.messageId,
@@ -210,6 +230,8 @@ export function getConversationContext(conn: DbConnection, conversationKey: stri
   const lastError = [...pending].reverse().find(m => m.lastError !== undefined)?.lastError;
   return {
     conversationKey,
+    route: toRoute(convo),
+    caseEpoch: convo.caseEpoch,
     activeIncident,
     intakeRevision: activeIncident?.intakeRevision ?? 0,
     currentFacts: activeIncident?.facts ?? emptyFacts(),
@@ -222,15 +244,30 @@ export function getConversationContext(conn: DbConnection, conversationKey: stri
   };
 }
 
-/** Saves caller messages idempotently (provider + conversation + message ID) and returns committed context. */
+/**
+ * Startup recovery: context for every conversation whose current case has RECEIVED (unapplied)
+ * messages, oldest pending first. Drain these after reconnecting.
+ */
+export function listPendingConversationContexts(conn: DbConnection): ConversationContext[] {
+  return [...conn.db.agentConversation.iter()]
+    .map(c => contextFor(conn, c))
+    .filter(c => c.pendingMessages.length > 0)
+    .sort((a, b) => a.pendingMessages[0].receivedAt.localeCompare(b.pendingMessages[0].receivedAt));
+}
+
+/**
+ * Saves caller messages idempotently (provider + conversation + message ID), refreshes the durable
+ * route, and returns committed context. New input on an active incident sets extractionState PENDING.
+ */
 export async function recordInbound(
   conn: DbConnection,
-  input: { provider: string; conversationKey: string; messages: CallerMessage[] }
+  input: { provider: string; conversationKey: string; route: ConversationRoute; messages: CallerMessage[] }
 ): Promise<ConversationContext> {
   await call(
     conn.reducers.recordInbound({
       provider: input.provider,
       conversationKey: input.conversationKey,
+      route: { platform: input.route.platform, spaceId: input.route.spaceId, line: input.route.line ?? undefined },
       messages: input.messages.map(m => ({ messageId: m.id, text: m.text, receivedAt: fromIso(m.receivedAt) })),
     })
   );
@@ -331,7 +368,7 @@ export function recordSentQuestion(
   return call(conn.reducers.recordSentQuestion(input));
 }
 
-/** Unsent (PENDING or FAILED) notification jobs, oldest first. */
+/** Startup recovery and polling: unsent (PENDING or FAILED) notification jobs with their routes, oldest first. */
 export function listPendingNotifications(conn: DbConnection): PendingNotification[] {
   return [...conn.db.agentNotification.iter()]
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
