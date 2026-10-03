@@ -1,10 +1,16 @@
 import { createContext, useContext, useSyncExternalStore } from "react";
 import type { FlareClient, Identity, Snapshot } from "../types";
 import { createFixtureClient, type FixtureClient } from "./fixtureClient";
+import { createLiveClient } from "./liveClient";
 
-// Single swap point: when Person 3's adapter lands, return a live FlareClient here for
-// VITE_DATA_MODE=live. The fixture stays available (clearly labelled) for offline work.
+// VITE_DATA_MODE=live connects to SpacetimeDB; anything else uses the labelled in-memory fixture.
 export function createClient(): FlareClient {
+  const env = import.meta.env;
+  if (env.VITE_DATA_MODE === "live") {
+    if (!env.VITE_SPACETIMEDB_URI || !env.VITE_SPACETIMEDB_DATABASE)
+      throw new Error("Live mode needs VITE_SPACETIMEDB_URI and VITE_SPACETIMEDB_DATABASE");
+    return createLiveClient({ uri: env.VITE_SPACETIMEDB_URI, database: env.VITE_SPACETIMEDB_DATABASE });
+  }
   const params = new URLSearchParams(location.search);
   const role = params.get("as") ?? (location.pathname.startsWith("/responder") ? "responder" : "dispatcher");
   const identity: Identity = role === "responder"

@@ -45,7 +45,7 @@ export function createFixtureClient(identity: Identity): FixtureClient {
 
   const build = () => {
     snapshot = {
-      connection, mode: "fixture", identity,
+      connection, mode: "fixture", identity, access: "ok",
       incidents: shared.incidents, units: shared.units, assignments: shared.assignments,
     };
   };
@@ -61,7 +61,7 @@ export function createFixtureClient(identity: Identity): FixtureClient {
   });
 
   const delay = <T,>(v: T) => new Promise<T>((r) => setTimeout(() => r(v), LATENCY_MS));
-  const fail = (code: Extract<OpResult, { ok: false }>["code"], message: string) =>
+  const fail = (code: string, message: string) =>
     delay<OpResult>({ ok: false, code, message });
   const now = () => new Date().toISOString();
 

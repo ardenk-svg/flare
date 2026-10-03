@@ -143,3 +143,28 @@ export function FixtureControls({ incidentId }: { incidentId: string | null }) {
     </details>
   );
 }
+
+/** Blocks a route until the live backend has authorized this identity for it. Fixture mode always passes. */
+export function AccessGate({ role, children }: { role: "dispatcher" | "responder"; children: React.ReactNode }) {
+  const { access, identity, identityHex, connection, connectError } = useSnapshot();
+  const shell = (body: React.ReactNode) => (
+    <div className="page"><SimBanner /><h1>{role === "dispatcher" ? "Dispatcher" : "Responder"}</h1>{body}</div>
+  );
+  if (connection === "connecting") return shell(<p className="muted">Connecting to the backend…</p>);
+  if (connectError && connection !== "connected")
+    return shell(<div className="notice err" role="alert">Cannot reach the backend: {connectError}. Retrying.</div>);
+  if (access === "no-role")
+    return shell(
+      <div className="notice err" role="alert">
+        This identity has no role yet. Ask the operator to grant one (Person 3's <code>grant_role</code>).
+        <div>Identity: <code>{identityHex}</code></div>
+      </div>);
+  if (access === "unsupported-role")
+    return shell(<div className="notice err" role="alert">This identity's role has no web view (agent/admin). Identity: <code>{identityHex}</code></div>);
+  if (identity.role !== role)
+    return shell(
+      <div className="notice err" role="alert">
+        This identity is authorized as {identity.role}, not {role}. Open <a href={`/${identity.role}`}>/{identity.role}</a> instead.
+      </div>);
+  return <>{children}</>;
+}

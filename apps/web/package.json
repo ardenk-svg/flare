@@ -12,7 +12,9 @@
   "dependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.0.0"
+    "react-router-dom": "^7.0.0",
+    "@flare/data": "file:../../packages/data",
+    "@flare/contracts": "file:../../packages/contracts"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
