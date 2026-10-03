@@ -120,7 +120,8 @@ export const NO_RULE_REASON = "No demo rule matched; dispatcher review required.
 
 // ---- Persistent state ----
 
-export type IncidentStatus = "COLLECTING" | "READY_FOR_REVIEW" | "DISPATCHED" | "RESOLVED";
+/** CLOSED: ended by a dispatcher without dispatch (never had assignments). */
+export type IncidentStatus = "COLLECTING" | "READY_FOR_REVIEW" | "DISPATCHED" | "RESOLVED" | "CLOSED";
 export type AssignmentStatus = "OFFERED" | "ACCEPTED" | "EN_ROUTE" | "ON_SCENE" | "COMPLETED";
 export type UnitStatus = "AVAILABLE" | "BUSY";
 export type InboundStatus = "RECEIVED" | "APPLIED";
@@ -132,8 +133,10 @@ export type ExtractionState = "OK" | "PENDING" | "FAILED";
 
 /**
  * Minimum provider route needed to reopen the original destination after restart.
- * For Spectrum iMessage: platform "iMessage", spaceId = space.id, line = the cloud line phone
- * (space.phone) when present. Agent-private; never shown in dispatcher/responder projections.
+ * For Spectrum iMessage: platform "imessage" (as emitted in message.platform), spaceId = space.id,
+ * line = space.phone. On Photon's shared-pool plan space.phone is the sentinel "shared"; store it
+ * as-is — space.get(spaceId, { phone: "shared" }) works because shared mode ignores the phone.
+ * Agent-private; never shown in dispatcher/responder projections.
  */
 export interface ConversationRoute {
   platform: string;
@@ -177,6 +180,8 @@ export interface Incident {
   extractionError: string | null;
   /** Intake case number within its conversation. */
   caseEpoch: number;
+  /** Dispatcher's reason when status is CLOSED. */
+  closeReason: string | null;
   createdAt: string;
   updatedAt: string;
 }

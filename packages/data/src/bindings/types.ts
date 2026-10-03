@@ -160,6 +160,7 @@ export const Incident = __t.object("Incident", {
   caseEpoch: __t.u32(),
   createdAt: __t.timestamp(),
   updatedAt: __t.timestamp(),
+  closeReason: __t.option(__t.string()),
 });
 export type Incident = __Infer<typeof Incident>;
 
