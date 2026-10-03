@@ -1,0 +1,29 @@
+:root { font-family: system-ui, sans-serif; color: #1a1a1a; background: #f6f6f4; }
+body { margin: 0; }
+.nav { padding: 8px 16px; background: #222; } .nav a { color: #fff; margin-right: 16px; }
+.page { padding: 0 16px 32px; }
+.banner { background: #fff3cd; padding: 8px 12px; margin: 12px 0; border-radius: 6px; }
+.fixture-tag { float: right; font-weight: 600; color: #8a5a00; }
+.bar { display: flex; gap: 12px; align-items: center; }
+.split { display: grid; grid-template-columns: 280px 1fr; gap: 24px; }
+@media (max-width: 720px) { .split { grid-template-columns: 1fr; } }
+.row { display: block; width: 100%; text-align: left; padding: 8px; margin-bottom: 8px; border: 1px solid #ccc; background: #fff; border-radius: 6px; cursor: pointer; }
+.row.sel { border-color: #c2410c; }
+.card { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 8px 12px; margin: 12px 0; }
+.pill { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 10px; background: #e5e5e5; margin: 0 4px; }
+.pill.warn { background: #fde68a; } .pill.conn-fixture { background: #fde68a; } .pill.conn-live { background: #bbf7d0; } .pill.conn-disconnected { background: #fecaca; }
+.muted { color: #777; } .quote { font-size: 12px; color: #555; }
+.facts th { text-align: left; padding-right: 16px; vertical-align: top; font-weight: 500; }
+.notice { background: #e0e7ff; padding: 8px; border-radius: 6px; } .notice.err { background: #fecaca; }
+.steps button { margin-right: 8px; padding: 8px 14px; }
+.unit { display: block; margin: 4px 0; }
+button { min-height: 44px; padding: 0 14px; cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+:focus-visible { outline: 3px solid #1d4ed8; outline-offset: 2px; }
+.stale { opacity: .6; }
+.pill.ident { background: #dbeafe; }
+.steps button.done { background: #bbf7d0; }
+fieldset.card { border: 1px solid #ddd; }
+.inline { margin-right: 12px; } .unit { display: block; margin: 6px 0; }
+.dev { border-style: dashed; } .dev-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.assign { padding-left: 18px; }
