@@ -1,15 +1,25 @@
 import { useClient, useSnapshot } from "../data";
 import {
-  ActionError, ConnectionStatus, ExtractionState, FactsTable, FixtureControls, IdentityBadge,
-  LocationCard, SimBanner, StaleBanner, useAction,
+  ActionError, AssignmentStatusChip, AssignmentStepper, ExtractionBadge, ExtractionNotice, FixtureControls, Icon,
+  LocationLine, Pending, RelativeTime, StaleBanner, useAction,
 } from "../components";
-import { ASSIGNMENT_ORDER, type AssignmentStatus } from "../types";
+import { ASSIGNMENT_ORDER, type AssignmentStatus, type CallerFacts } from "../types";
 
-const STEPS: { label: string; reaches: AssignmentStatus }[] = [
-  { label: "Accept", reaches: "ACCEPTED" },
-  { label: "En Route", reaches: "EN_ROUTE" },
-  { label: "On Scene", reaches: "ON_SCENE" },
-  { label: "Complete", reaches: "COMPLETED" },
+const NEXT_ACTION: Partial<Record<AssignmentStatus, string>> = {
+  ACCEPTED: "Accept assignment",
+  EN_ROUTE: "Mark en route",
+  ON_SCENE: "Mark on scene",
+  COMPLETED: "Mark complete",
+};
+
+// Safety-relevant caller facts, phrased for the crew. Unknowns are hidden.
+const SAFETY: { key: keyof CallerFacts; yes: string; no: string; danger: boolean }[] = [
+  { key: "fireOrSmoke", yes: "Fire or smoke reported", no: "No fire or smoke", danger: true },
+  { key: "trappedPerson", yes: "Person trapped", no: "No one trapped", danger: true },
+  { key: "violentThreat", yes: "Violent threat reported", no: "No violent threat", danger: true },
+  { key: "injuryReported", yes: "Injury reported", no: "No injury reported", danger: true },
+  { key: "callerReportedBreathing", yes: "Breathing", no: "Not breathing", danger: false },
+  { key: "callerReportedConscious", yes: "Conscious", no: "Not conscious", danger: false },
 ];
 
 export default function Responder() {
@@ -21,49 +31,80 @@ export default function Responder() {
     ?? assignments.find((a) => a.unitId === identity.unitId);
   const incident = incidents.find((i) => i.id === assignment?.incidentId);
 
+  if (!assignment || !incident)
+    return (
+      <div className="page page-narrow">
+        <StaleBanner />
+        <div className="empty">
+          <p><strong className="mono">{identity.unitId}</strong> has no assignment.</p>
+          <p className="small">When a dispatcher assigns this mock unit, the incident shows up here.</p>
+        </div>
+        <FixtureControls incidentId={null} />
+      </div>
+    );
+
+  const next = ASSIGNMENT_ORDER[ASSIGNMENT_ORDER.indexOf(assignment.status) + 1] as AssignmentStatus | undefined;
+  const done = assignment.status === "COMPLETED";
+  const f = incident.facts;
+  // Conditions where "no" is the dangerous answer (breathing, conscious) flip the danger tone.
+  const safety = SAFETY.filter((s) => f[s.key] !== null).map((s) => {
+    const yes = f[s.key] === true;
+    return { key: s.key, label: yes ? s.yes : s.no, alarming: s.danger ? yes : !yes };
+  });
+
   return (
-    <div className="page">
-      <SimBanner />
-      <header className="bar">
-        <h1>Responder</h1>
-        <IdentityBadge />
-        <ConnectionStatus />
-      </header>
+    <div className="page page-narrow">
       <StaleBanner />
-      {!assignment || !incident ? (
-        <p className="muted">No assignment for {identity.unitId} yet. Waiting for simulated dispatch.</p>
-      ) : (
-        <main className={offline ? "stale" : ""}>
-          <h2>{incident.id}</h2>
-          <p>
-            Incident: <span className="pill">{incident.status}</span>{" "}
-            Your assignment: <span className="pill">{assignment.status}</span>
-          </p>
-          {incident.needsReview && <div className="notice err">Caller facts changed after dispatch. Dispatcher has been flagged to review.</div>}
-          <ExtractionState incident={incident} />
-          <p>{incident.summary}</p>
-          <LocationCard text={incident.facts.locationText} />
-          <FactsTable facts={incident.facts} evidence={[]} corrections={incident.corrections} />
-          <div className="steps" role="group" aria-label="Assignment progress">
-            {STEPS.map((s) => {
-              const cur = ASSIGNMENT_ORDER.indexOf(assignment.status);
-              const idx = ASSIGNMENT_ORDER.indexOf(s.reaches);
-              const done = idx <= cur;
-              const isNext = idx === cur + 1;
-              return (
-                <button key={s.label} className={done ? "done" : ""}
-                  disabled={!isNext || offline || act.pending}
-                  onClick={() => act.run(() => client.advanceAssignment({ assignmentId: assignment.id, next: s.reaches }))}>
-                  {done ? "✓ " : ""}{s.label}
-                </button>
-              );
-            })}
+      <div className={`stack ${offline ? "stale" : ""}`}>
+        <section className={`card mission ${done ? "done" : ""}`} aria-label="Your assignment">
+          <div className="mission-head">
+            <span className="mono">{assignment.unitId}</span>
+            <AssignmentStatusChip status={assignment.status} />
           </div>
-          {act.pending && <div className="muted">Waiting for the backend to confirm…</div>}
+          {next ? (
+            <button className="btn primary big" disabled={offline || act.pending}
+              onClick={() => act.run(() => client.advanceAssignment({ assignmentId: assignment.id, next }))}>
+              {act.pending ? <Pending label="Waiting for the backend…" /> : NEXT_ACTION[next]}
+            </button>
+          ) : (
+            <p className="notice"><Icon name="check" /><span>Assignment complete. The dispatcher will resolve the incident.</span></p>
+          )}
           <ActionError message={act.error} />
-        </main>
-      )}
-      <FixtureControls incidentId={incident?.id ?? null} />
+          <AssignmentStepper status={assignment.status} />
+          <RelativeTime iso={assignment.updatedAt} prefix="Updated" />
+        </section>
+
+        {incident.needsReview && (
+          <div className="notice err" role="status">
+            <Icon name="alert" /><span>The caller changed facts after dispatch. The dispatcher is reviewing them.</span>
+          </div>
+        )}
+        <ExtractionNotice incident={incident} />
+
+        <section className="card">
+          <h2 className="card-title">Location <span className="hint">typed by caller, unverified</span></h2>
+          {f.locationText ? <p className="big-location">{f.locationText}</p> : <LocationLine text={null} />}
+        </section>
+
+        <section className="card">
+          <h2 className="card-title">
+            Incident <span className="hint">caller-reported, unverified</span>
+            <ExtractionBadge incident={incident} />
+          </h2>
+          <dl className="kv">
+            <dt>Type</dt><dd>{f.incidentType ?? <span className="muted">Not reported</span>}</dd>
+            {f.peopleInvolved !== null && <><dt>People</dt><dd>{f.peopleInvolved}</dd></>}
+          </dl>
+          {safety.length > 0 && (
+            <div className="safety" style={{ marginTop: 12 }}>
+              {safety.map((s) => <span key={s.key} className={`chip ${s.alarming ? "danger" : "ok"}`}>{s.label}</span>)}
+            </div>
+          )}
+          {incident.summary && <p className="reason">{incident.summary}</p>}
+        </section>
+        <p className="muted small mono">Incident #{incident.id}</p>
+      </div>
+      <FixtureControls incidentId={incident.id} />
     </div>
   );
 }

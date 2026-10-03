@@ -8,14 +8,15 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p scripts",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "smoke:live": "tsx scripts/smoke-live.ts"
+    "smoke:live": "tsx scripts/smoke-live.ts",
+    "seed:demo": "tsx scripts/seed-demo.ts"
   },
   "dependencies": {
+    "@flare/contracts": "file:../../packages/contracts",
+    "@flare/data": "file:../../packages/data",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.0.0",
-    "@flare/data": "file:../../packages/data",
-    "@flare/contracts": "file:../../packages/contracts"
+    "react-router-dom": "^7.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
