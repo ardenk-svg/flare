@@ -13,6 +13,7 @@ import { AgentStateStore } from "../src/state-store.js";
 const job: PendingNotification = {
   id: "7",
   conversationKey: "imessage:chat-1",
+  route: { platform: "imessage", spaceId: "chat-1", line: null },
   incidentId: "1",
   assignmentId: "2",
   kind: "ASSIGNMENT_EN_ROUTE",

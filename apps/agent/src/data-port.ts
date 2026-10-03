@@ -2,6 +2,7 @@ import type {
   Assignment,
   CallerMessage,
   ConversationContext,
+  ConversationRoute,
   ExtractionOutcome,
   ExtractionResult,
   PendingNotification,
@@ -21,12 +22,27 @@ import {
   type FlareConnection,
 } from "@flare/data";
 
+import type { ProviderRoute } from "./types.js";
+
+/** Converts between the agent's Spectrum route and the contract's durable database route. */
+export const toConversationRoute = (route: ProviderRoute): ConversationRoute => ({
+  platform: route.platform,
+  spaceId: route.spaceId,
+  line: route.phone ?? null,
+});
+export const toProviderRoute = (route: ConversationRoute): ProviderRoute => ({
+  platform: route.platform,
+  spaceId: route.spaceId,
+  ...(route.line ? { phone: route.line } : {}),
+});
+
 export type ExtractionFailure = Extract<ExtractionOutcome, { ok: false }>['error'];
 
 export interface AgentDataPort {
   recordInbound(input: {
     provider: string;
     conversationKey: string;
+    route: ConversationRoute;
     messages: CallerMessage[];
   }): Promise<ConversationContext>;
   getConversationContext(conversationKey: string): ConversationContext | null;
