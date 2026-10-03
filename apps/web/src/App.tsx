@@ -9,7 +9,7 @@ export default function App() {
     <BrowserRouter>
       <nav className="nav">
         <a href="/dispatcher">Dispatcher</a> <a href="/responder">Responder</a>
-        <a href="/responder?unit=EMS-01">Responder (EMS-01)</a>
+        {import.meta.env.VITE_DATA_MODE !== "live" && <a href="/responder?unit=EMS-01">Responder (EMS-01)</a>}
       </nav>
       <Routes>
         <Route path="/dispatcher" element={<AccessGate role="dispatcher"><Dispatcher /></AccessGate>} />
