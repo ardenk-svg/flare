@@ -11,12 +11,16 @@ import {
 } from "spacetimedb";
 
 import {
+  RouteInput,
   InboundInput,
 } from "./types";
 
 export default {
   provider: __t.string(),
   conversationKey: __t.string(),
+  get route() {
+    return RouteInput;
+  },
   get messages() {
     return __t.array(InboundInput);
   },

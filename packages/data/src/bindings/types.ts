@@ -54,6 +54,10 @@ export const Conversation = __t.object("Conversation", {
   lastQuestionDelivery: __t.option(__t.string()),
   lastQuestionError: __t.option(__t.string()),
   lastQuestionAt: __t.option(__t.timestamp()),
+  caseEpoch: __t.u32(),
+  routePlatform: __t.string(),
+  routeSpaceId: __t.string(),
+  routeLine: __t.option(__t.string()),
   createdAt: __t.timestamp(),
   updatedAt: __t.timestamp(),
 });
@@ -66,6 +70,10 @@ export const ConversationContextRow = __t.object("ConversationContextRow", {
   lastQuestion: __t.option(__t.string()),
   lastQuestionDelivery: __t.option(__t.string()),
   lastQuestionError: __t.option(__t.string()),
+  caseEpoch: __t.u32(),
+  routePlatform: __t.string(),
+  routeSpaceId: __t.string(),
+  routeLine: __t.option(__t.string()),
 });
 export type ConversationContextRow = __Infer<typeof ConversationContextRow>;
 
@@ -102,6 +110,7 @@ export const InboundContextRow = __t.object("InboundContextRow", {
   status: __t.string(),
   attempts: __t.u32(),
   lastError: __t.option(__t.string()),
+  caseEpoch: __t.u32(),
 });
 export type InboundContextRow = __Infer<typeof InboundContextRow>;
 
@@ -123,6 +132,7 @@ export const InboundMessage = __t.object("InboundMessage", {
   attempts: __t.u32(),
   lastError: __t.option(__t.string()),
   appliedAt: __t.option(__t.timestamp()),
+  caseEpoch: __t.u32(),
 });
 export type InboundMessage = __Infer<typeof InboundMessage>;
 
@@ -146,6 +156,8 @@ export const Incident = __t.object("Incident", {
   status: __t.string(),
   needsReview: __t.bool(),
   extractionError: __t.option(__t.string()),
+  extractionState: __t.string(),
+  caseEpoch: __t.u32(),
   createdAt: __t.timestamp(),
   updatedAt: __t.timestamp(),
 });
@@ -176,6 +188,9 @@ export type Notification = __Infer<typeof Notification>;
 export const PendingNotificationRow = __t.object("PendingNotificationRow", {
   id: __t.u64(),
   conversationKey: __t.string(),
+  routePlatform: __t.string(),
+  routeSpaceId: __t.string(),
+  routeLine: __t.option(__t.string()),
   incidentId: __t.option(__t.u64()),
   assignmentId: __t.option(__t.u64()),
   kind: __t.string(),
@@ -200,6 +215,13 @@ export const RoleInfo = __t.object("RoleInfo", {
   unitId: __t.option(__t.string()),
 });
 export type RoleInfo = __Infer<typeof RoleInfo>;
+
+export const RouteInput = __t.object("RouteInput", {
+  platform: __t.string(),
+  spaceId: __t.string(),
+  line: __t.option(__t.string()),
+});
+export type RouteInput = __Infer<typeof RouteInput>;
 
 export const StoredEvidence = __t.object("StoredEvidence", {
   field: __t.string(),

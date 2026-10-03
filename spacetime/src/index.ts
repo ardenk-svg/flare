@@ -66,6 +66,13 @@ const StoredEvidence = t.object('StoredEvidence', {
   intakeRevision: t.u32(),
 });
 
+/** Minimum provider route needed to reopen the original destination after restart. Agent-private. */
+const RouteInput = t.object('RouteInput', {
+  platform: t.string(),
+  spaceId: t.string(),
+  line: t.option(t.string()),
+});
+
 const InboundInput = t.object('InboundInput', {
   messageId: t.string(),
   text: t.string(),
@@ -110,6 +117,8 @@ const incident = table(
     status: t.string(),
     needsReview: t.bool(),
     extractionError: t.option(t.string()),
+    extractionState: t.string(),
+    caseEpoch: t.u32(),
     createdAt: t.timestamp(),
     updatedAt: t.timestamp(),
   }
@@ -138,6 +147,10 @@ const conversation = table(
     lastQuestionDelivery: t.option(t.string()),
     lastQuestionError: t.option(t.string()),
     lastQuestionAt: t.option(t.timestamp()),
+    caseEpoch: t.u32(),
+    routePlatform: t.string(),
+    routeSpaceId: t.string(),
+    routeLine: t.option(t.string()),
     createdAt: t.timestamp(),
     updatedAt: t.timestamp(),
   }
@@ -156,6 +169,7 @@ const inboundMessage = table(
     attempts: t.u32(),
     lastError: t.option(t.string()),
     appliedAt: t.option(t.timestamp()),
+    caseEpoch: t.u32(),
   }
 );
 
@@ -219,15 +233,38 @@ function activeIncident(ctx: Ctx, convo: { activeIncidentId: bigint | undefined 
   return ctx.db.incident.id.find(convo.activeIncidentId) ?? undefined;
 }
 
-function messagesFor(ctx: Ctx, conversationId: bigint, messageIds: string[]) {
+/** Source messages by provider ID. Rows from an earlier case are rejected as STALE_CASE. */
+function messagesFor(ctx: Ctx, convo: { id: bigint; caseEpoch: number }, messageIds: string[]) {
   const byId = new Map<string, ReturnType<typeof ctx.db.inboundMessage.insert>>();
-  for (const row of ctx.db.inboundMessage.conversationId.filter(conversationId)) {
+  for (const row of ctx.db.inboundMessage.conversationId.filter(convo.id)) {
     byId.set(row.messageId, row);
   }
   return messageIds.map(id => {
     const row = byId.get(id);
     if (!row) throw new SenderError(`UNKNOWN_MESSAGE: ${id}`);
+    if (row.caseEpoch !== convo.caseEpoch) throw new SenderError(`STALE_CASE: ${id}`);
     return row;
+  });
+}
+
+function hasPendingInbound(ctx: Ctx, convo: { id: bigint; caseEpoch: number }) {
+  for (const row of ctx.db.inboundMessage.conversationId.filter(convo.id)) {
+    if (row.caseEpoch === convo.caseEpoch && row.status === 'RECEIVED') return true;
+  }
+  return false;
+}
+
+/** After a successful completion: OK unless more current-case input is still waiting. Clears a stale error. */
+function settleExtractionState(ctx: Ctx, convo: { id: bigint; caseEpoch: number; activeIncidentId: bigint | undefined }) {
+  const fresh = ctx.db.conversation.id.find(convo.id);
+  const inc = fresh ? activeIncident(ctx, fresh) : undefined;
+  if (!inc) return;
+  const pending = hasPendingInbound(ctx, convo);
+  ctx.db.incident.id.update({
+    ...inc,
+    extractionState: pending ? 'PENDING' : 'OK',
+    extractionError: pending ? inc.extractionError : undefined,
+    updatedAt: ctx.timestamp,
   });
 }
 
@@ -345,10 +382,11 @@ export const resetDemo = spacetimedb.reducer(ctx => {
 // ---- Agent intake operations ----
 
 export const recordInbound = spacetimedb.reducer(
-  { provider: t.string(), conversationKey: t.string(), messages: t.array(InboundInput) },
-  (ctx, { provider, conversationKey, messages }) => {
+  { provider: t.string(), conversationKey: t.string(), route: RouteInput, messages: t.array(InboundInput) },
+  (ctx, { provider, conversationKey, route, messages }) => {
     requireRole(ctx, 'AGENT');
     if (conversationKey.trim() === '') throw new SenderError('INVALID_CONVERSATION_KEY');
+    if (route.platform.trim() === '' || route.spaceId.trim() === '') throw new SenderError('INVALID_ROUTE');
     let convo = ctx.db.conversation.conversationKey.find(conversationKey);
     if (!convo) {
       convo = ctx.db.conversation.insert({
@@ -359,10 +397,22 @@ export const recordInbound = spacetimedb.reducer(
         lastQuestionDelivery: undefined,
         lastQuestionError: undefined,
         lastQuestionAt: undefined,
+        caseEpoch: 1,
+        routePlatform: route.platform,
+        routeSpaceId: route.spaceId,
+        routeLine: route.line,
         createdAt: ctx.timestamp,
         updatedAt: ctx.timestamp,
       });
+    } else if (
+      convo.routePlatform !== route.platform ||
+      convo.routeSpaceId !== route.spaceId ||
+      convo.routeLine !== route.line
+    ) {
+      convo = { ...convo, routePlatform: route.platform, routeSpaceId: route.spaceId, routeLine: route.line, updatedAt: ctx.timestamp };
+      ctx.db.conversation.id.update(convo);
     }
+    let inserted = false;
     for (const m of messages) {
       const dedupeKey = `${provider}\u0000${conversationKey}\u0000${m.messageId}`;
       if (ctx.db.inboundMessage.dedupeKey.find(dedupeKey)) continue; // duplicate delivery: no-op
@@ -377,7 +427,13 @@ export const recordInbound = spacetimedb.reducer(
         attempts: 0,
         lastError: undefined,
         appliedAt: undefined,
+        caseEpoch: convo.caseEpoch,
       });
+      inserted = true;
+    }
+    const inc = activeIncident(ctx, convo);
+    if (inserted && inc && inc.extractionState !== 'PENDING') {
+      ctx.db.incident.id.update({ ...inc, extractionState: 'PENDING', updatedAt: ctx.timestamp });
     }
   }
 );
@@ -388,12 +444,14 @@ export const recordExtractionFailure = spacetimedb.reducer(
     requireRole(ctx, 'AGENT');
     const convo = requireConversation(ctx, conversationKey);
     const error = clip(`${code}: ${message}`);
-    for (const row of messagesFor(ctx, convo.id, messageIds)) {
+    for (const row of messagesFor(ctx, convo, messageIds)) {
       if (row.status !== 'RECEIVED') continue;
       ctx.db.inboundMessage.id.update({ ...row, attempts: row.attempts + 1, lastError: error });
     }
     const inc = activeIncident(ctx, convo);
-    if (inc) ctx.db.incident.id.update({ ...inc, extractionError: error, updatedAt: ctx.timestamp });
+    if (inc) {
+      ctx.db.incident.id.update({ ...inc, extractionError: error, extractionState: 'FAILED', updatedAt: ctx.timestamp });
+    }
   }
 );
 
@@ -419,7 +477,7 @@ export const applyIntakePatch = spacetimedb.reducer(
       throw new SenderError('INVALID_INTENT: use completeInboundWithoutPatch for STATUS_QUERY/OTHER');
     }
     if (args.sourceMessageIds.length === 0) throw new SenderError('NO_SOURCE_MESSAGES');
-    const sources = messagesFor(ctx, convo.id, args.sourceMessageIds);
+    const sources = messagesFor(ctx, convo, args.sourceMessageIds);
     const applied = sources.filter(m => m.status === 'APPLIED').length;
     if (applied === sources.length) return; // duplicate batch already committed: harmless no-op
     if (applied > 0) throw new SenderError('PARTIALLY_APPLIED_SOURCES');
@@ -449,9 +507,11 @@ export const applyIntakePatch = spacetimedb.reducer(
     }
     checkServices(args.recommendedServices, 'recommended');
 
-    // Every changed fact needs evidence quoted from a known caller message of this conversation.
+    // Every changed fact needs evidence quoted from a caller message of this conversation's current case.
     const known = new Map<string, string>();
-    for (const row of ctx.db.inboundMessage.conversationId.filter(convo.id)) known.set(row.messageId, row.text);
+    for (const row of ctx.db.inboundMessage.conversationId.filter(convo.id)) {
+      if (row.caseEpoch === convo.caseEpoch) known.set(row.messageId, row.text);
+    }
     for (const e of args.evidence) {
       if (!FACT_FIELDS.includes(e.field)) throw new SenderError(`INVALID_FIELD: ${e.field}`);
       const text = known.get(e.messageId);
@@ -482,6 +542,8 @@ export const applyIntakePatch = spacetimedb.reducer(
         status: 'COLLECTING',
         needsReview: false,
         extractionError: undefined,
+        extractionState: 'PENDING',
+        caseEpoch: convo.caseEpoch,
         createdAt: ctx.timestamp,
         updatedAt: ctx.timestamp,
       });
@@ -523,6 +585,7 @@ export const applyIntakePatch = spacetimedb.reducer(
     for (const m of sources) {
       ctx.db.inboundMessage.id.update({ ...m, status: 'APPLIED', lastError: undefined, appliedAt: ctx.timestamp });
     }
+    settleExtractionState(ctx, convo);
   }
 );
 
@@ -532,12 +595,13 @@ export const completeInboundWithoutPatch = spacetimedb.reducer(
     requireRole(ctx, 'AGENT');
     if (intent !== 'STATUS_QUERY' && intent !== 'OTHER') throw new SenderError(`INVALID_INTENT: ${intent}`);
     const convo = requireConversation(ctx, conversationKey);
-    const sources = messagesFor(ctx, convo.id, messageIds);
+    const sources = messagesFor(ctx, convo, messageIds);
     if (sources.every(m => m.status === 'APPLIED')) return; // duplicate: no-op, no second reply
     for (const m of sources) {
       if (m.status === 'APPLIED') continue;
       ctx.db.inboundMessage.id.update({ ...m, status: 'APPLIED', lastError: undefined, appliedAt: ctx.timestamp });
     }
+    settleExtractionState(ctx, convo);
     if (replyText !== undefined && replyText.trim() !== '') {
       enqueue(ctx, {
         conversationId: convo.id,
@@ -644,7 +708,17 @@ export const resolveIncident = spacetimedb.reducer({ incidentId: t.u64() }, (ctx
   ctx.db.incident.id.update({ ...inc, status: 'RESOLVED', updatedAt: ctx.timestamp });
   const convo = ctx.db.conversation.id.find(inc.conversationId);
   if (convo && convo.activeIncidentId === incidentId) {
-    ctx.db.conversation.id.update({ ...convo, activeIncidentId: undefined, updatedAt: ctx.timestamp });
+    // Start a new intake case: later context reads exclude this case's messages and question.
+    ctx.db.conversation.id.update({
+      ...convo,
+      activeIncidentId: undefined,
+      caseEpoch: convo.caseEpoch + 1,
+      lastQuestion: undefined,
+      lastQuestionDelivery: undefined,
+      lastQuestionError: undefined,
+      lastQuestionAt: undefined,
+      updatedAt: ctx.timestamp,
+    });
   }
 });
 
@@ -697,6 +771,10 @@ const AgentConversation = t.row('ConversationContextRow', {
   lastQuestion: t.option(t.string()),
   lastQuestionDelivery: t.option(t.string()),
   lastQuestionError: t.option(t.string()),
+  caseEpoch: t.u32(),
+  routePlatform: t.string(),
+  routeSpaceId: t.string(),
+  routeLine: t.option(t.string()),
 });
 
 const AgentInbound = t.row('InboundContextRow', {
@@ -708,11 +786,15 @@ const AgentInbound = t.row('InboundContextRow', {
   status: t.string(),
   attempts: t.u32(),
   lastError: t.option(t.string()),
+  caseEpoch: t.u32(),
 });
 
 const AgentNotification = t.row('PendingNotificationRow', {
   id: t.u64().primaryKey(),
   conversationKey: t.string(),
+  routePlatform: t.string(),
+  routeSpaceId: t.string(),
+  routeLine: t.option(t.string()),
   incidentId: t.option(t.u64()),
   assignmentId: t.option(t.u64()),
   kind: t.string(),
@@ -771,16 +853,20 @@ export const agentConversation = spacetimedb.view(
       lastQuestion: c.lastQuestion,
       lastQuestionDelivery: c.lastQuestionDelivery,
       lastQuestionError: c.lastQuestionError,
+      caseEpoch: c.caseEpoch,
+      routePlatform: c.routePlatform,
+      routeSpaceId: c.routeSpaceId,
+      routeLine: c.routeLine,
     }));
   }
 );
 
-/** Agent: unapplied messages plus the most recent applied ones per conversation. */
+/** Agent: current-case unapplied messages plus the most recent applied ones. Earlier cases stay stored but hidden. */
 export const agentInbound = spacetimedb.view({ name: 'agent_inbound', public: true }, t.array(AgentInbound), ctx => {
   if (!hasRole(ctx, 'AGENT')) return [];
   const out = [];
   for (const c of ctx.db.conversation.iter()) {
-    const rows = [...ctx.db.inboundMessage.conversationId.filter(c.id)].sort((a, b) =>
+    const rows = [...ctx.db.inboundMessage.conversationId.filter(c.id)].filter(r => r.caseEpoch === c.caseEpoch).sort((a, b) =>
       a.id < b.id ? -1 : a.id > b.id ? 1 : 0
     );
     const applied = rows.filter(r => r.status === 'APPLIED').slice(-RECENT_MESSAGE_LIMIT);
@@ -795,6 +881,7 @@ export const agentInbound = spacetimedb.view({ name: 'agent_inbound', public: tr
         status: r.status,
         attempts: r.attempts,
         lastError: r.lastError,
+        caseEpoch: r.caseEpoch,
       });
     }
   }
@@ -815,6 +902,9 @@ export const agentNotification = spacetimedb.view(
       out.push({
         id: n.id,
         conversationKey: convo.conversationKey,
+        routePlatform: convo.routePlatform,
+        routeSpaceId: convo.routeSpaceId,
+        routeLine: convo.routeLine,
         incidentId: n.incidentId,
         assignmentId: n.assignmentId,
         kind: n.kind,

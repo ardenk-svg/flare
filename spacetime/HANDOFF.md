@@ -21,6 +21,18 @@ npm run check                # live checks; RESETS the local database first
 
 The identity that publishes becomes `ADMIN`, and `init` seeds `FIRE-01`, `EMS-01`, and `POLICE-01`.
 
+## Shared integration database (Maincloud)
+
+Only Person 3 publishes or resets the shared database. Announce every publish and reset.
+
+```sh
+spacetime login                                   # one-time GitHub sign-in in the browser
+FLARE_DB=<agreed-name> npm run publish:shared     # from spacetime/; the publishing identity becomes ADMIN
+npm run generate                                  # if the schema changed; commit the regenerated bindings
+```
+
+The shared database is `flare-yyehc`. Clients connect with `SPACETIMEDB_URI=wss://maincloud.spacetimedb.com` and `SPACETIMEDB_DATABASE=flare-yyehc`. Grant roles with the commands below, using `--server maincloud` in place of `--server local`. A schema change that is not additive needs `--delete-data`. That wipes the shared state, so announce it first and re-grant roles afterwards.
+
 ## Identities and roles
 
 Each client keeps its own token. `connectFlare` returns `identityHex` and `token`. Persist the token, such as in `localStorage` or the agent's local env, so the identity stays the same. Grant roles from the publisher's CLI:
@@ -37,27 +49,40 @@ Use separate browser profiles for the dispatcher and the responder, because tabs
 
 ## For teammates
 
-- **Person 1 (agent):** `connectFlare({ uri, database, token })`, then `recordInbound` → `getConversationContext` → `extractTurn` → `applyIntakePatch` / `completeInboundWithoutPatch` / `recordExtractionFailure`. On `FlareOpError` with code `STALE_REVISION`, reload context and retry the pending messages. Send notifications with `onNotification` / `listPendingNotifications`, then `ackNotification`. The generated bindings use extensionless imports, so run them with `tsx` or a bundler, not plain `node`.
+- **Person 1 (agent):**
+  - Connect with `connectFlare({ uri, database, token })`.
+  - For each message: `recordInbound` (with `route: { platform, spaceId: space.id, line: space.phone ?? null }`) → `getConversationContext` → `extractTurn` → `applyIntakePatch`, `completeInboundWithoutPatch` or `recordExtractionFailure`.
+  - On `FlareOpError` code `STALE_REVISION`, reload context and retry the pending messages. On `STALE_CASE`, drop that work.
+  - At startup, drain `listPendingConversationContexts` and `listPendingNotifications`, subscribe with `onNotification`, reopen each job's `route`, send, then `ackNotification`. The generated bindings use extensionless imports, so run them with `tsx` or a bundler, not plain `node`.
 - **Person 2 (intake):** types come from `@flare/contracts` (`"@flare/contracts": "file:../contracts"`). Evidence quotes must be exact substrings of the caller message, or the backend rejects them.
-- **Person 4 (web):** use either the adapter functions (`listIncidents`, `listAssignments`, `listUnits`, `getMyRole`, `confirmDispatchAndAssign`, `advanceAssignment`, `resolveIncident`) or `spacetimedb/react` with `tables.incidentView`, `tables.assignmentView`, `tables.unitView`, and `tables.myRole` from `@flare/data`. Row mappers: `toIncident`, `toAssignment`, `toUnit`.
+- **Person 4 (web):** map `Incident.extractionState` (`OK | PENDING | FAILED`) directly. `extractionError` holds the sanitized message. Use either the adapter functions (`listIncidents`, `listAssignments`, `listUnits`, `getMyRole`, `confirmDispatchAndAssign`, `advanceAssignment`, `resolveIncident`) or `spacetimedb/react` with `tables.incidentView`, `tables.assignmentView`, `tables.unitView`, and `tables.myRole` from `@flare/data`. Row mappers: `toIncident`, `toAssignment`, `toUnit`.
 
 Env names (proposed, values local only): `SPACETIMEDB_URI` (e.g. `ws://127.0.0.1:3000`), `SPACETIMEDB_DATABASE`, plus a per-client token.
 
 ## Design notes
 
 - All tables are private. Clients read only the role-gated views `my_role`, `unit_view`, `incident_view`, `assignment_view`, `agent_conversation`, `agent_inbound`, and `agent_notification`. Raw messages and conversation keys are visible only to `AGENT`.
+- Each conversation stores a route (`routePlatform`, `routeSpaceId`, `routeLine`) and a `caseEpoch`. Inbound messages and incidents record their `caseEpoch`. `resolveIncident` advances the epoch and clears question fields. Agent views show only current-case messages.
 - Patches are sent as `FactChange[]` with a `FactValue` of `Unknown | Bool | Count | Text`, so omitted fields, explicit null, and false stay distinct. The adapter converts this from `CallerFactPatch`.
 - Reducers run serializably, so of two simultaneous reservations one wins and the other gets `UNIT_CONFLICT`.
 - Notification text is rendered at commit time with a `[SIMULATION]` label. `eventAt` and `eventAssignmentStatus` let the agent present an old job as a past event.
 
 ## Checks run (local, in-memory server)
 
-`npm run check` in `packages/data`: 47/47 passed on 3 consecutive runs. It covers duplicate inbound, extraction failure retry, evidence validation, stale revision, correction, unknown versus false, authorization (outsider, wrong role, wrong responder), view read restrictions, dispatch/notification atomicity, skipped stages, status queries, post-dispatch review flags, ack/failed delivery, resolve preconditions, independent assignments, concurrent reservation conflicts, and reconnecting with the same token.
+`npm run check` in `packages/data`: 64/64 passed on 6 consecutive runs (integration-state branch). New checks:
+- `PENDING → OK`, `PENDING → FAILED` (facts and revision kept), and a successful retry back to `OK`
+- case A resolved → case B in the same conversation: empty facts, summary and question, only its own messages, a separate incident; case A history kept
+- `STALE_CASE` and old-case evidence rejected
+- route stored but invisible to dispatcher, responder and outsider
+- reconnect with the agent token lists pending intake and unacknowledged notifications, with their routes
+
+Earlier checks cover duplicate inbound, extraction failure retry, evidence validation, stale revision, correction, unknown versus false, authorization (outsider, wrong role, wrong responder), view read restrictions, dispatch/notification atomicity, skipped stages, status queries, post-dispatch review flags, ack/failed delivery, resolve preconditions, independent assignments, concurrent reservation conflicts, and reconnecting with the same token.
 
 ## Not done / open
 
-- Not yet published to a shared integration or maincloud database, and no team announcement yet.
-- No root workspace: packages link through `file:` dependencies. Person 1 may convert them to npm workspaces.
+- Not yet published to Maincloud. Run `spacetime login`, then `npm run publish:shared` after this PR merges. Then collect identity hexes from Persons 1 and 4 and grant roles.
+- The route field mapping (`space.id`, `space.phone`) comes from the `@spectrum-ts/imessage` 12.10.1 type definitions. Person 1 should confirm it against a live inbound event.
+- `spacetime/` stays outside the root workspace, as `NEXT_STEPS.md` requires. `packages/*` have their own lockfiles and `file:` dependencies. Root `npm ci` currently fails on lockfile drift, which Person 1 reconciles.
 - Restarting the server with `--in-memory` loses data. For persistence, run without `--in-memory`.
 - Views use full-table `iter()`. The docs recommend indexed lookups. This is fine at demo scale and has not been load-tested.
 - Expected rejections appear as `ERROR` lines in `spacetime logs`. They are reducer `SenderError`s, not crashes.

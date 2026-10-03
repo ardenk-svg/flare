@@ -19,4 +19,5 @@ export default __t.row({
   status: __t.string(),
   attempts: __t.u32(),
   lastError: __t.option(__t.string()).name("last_error"),
+  caseEpoch: __t.u32().name("case_epoch"),
 });

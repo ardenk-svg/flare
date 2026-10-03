@@ -17,4 +17,8 @@ export default __t.row({
   lastQuestion: __t.option(__t.string()).name("last_question"),
   lastQuestionDelivery: __t.option(__t.string()).name("last_question_delivery"),
   lastQuestionError: __t.option(__t.string()).name("last_question_error"),
+  caseEpoch: __t.u32().name("case_epoch"),
+  routePlatform: __t.string().name("route_platform"),
+  routeSpaceId: __t.string().name("route_space_id"),
+  routeLine: __t.option(__t.string()).name("route_line"),
 });

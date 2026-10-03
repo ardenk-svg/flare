@@ -128,6 +128,18 @@ export type NotificationKind = "DISPATCH_CONFIRMED" | "ASSIGNMENT_EN_ROUTE" | "I
 export type NotificationStatus = "PENDING" | "SENT" | "FAILED";
 export type QuestionDelivery = "SENT" | "FAILED";
 export type Role = "ADMIN" | "AGENT" | "DISPATCHER" | "RESPONDER";
+export type ExtractionState = "OK" | "PENDING" | "FAILED";
+
+/**
+ * Minimum provider route needed to reopen the original destination after restart.
+ * For Spectrum iMessage: platform "iMessage", spaceId = space.id, line = the cloud line phone
+ * (space.phone) when present. Agent-private; never shown in dispatcher/responder projections.
+ */
+export interface ConversationRoute {
+  platform: string;
+  spaceId: string;
+  line: string | null;
+}
 
 export const ASSIGNMENT_ORDER: readonly AssignmentStatus[] = [
   "OFFERED",
@@ -160,7 +172,11 @@ export interface Incident {
   confirmedServices: Service[];
   status: IncidentStatus;
   needsReview: boolean;
+  /** PENDING while current-case input awaits extraction; FAILED keeps the last verified facts. */
+  extractionState: ExtractionState;
   extractionError: string | null;
+  /** Intake case number within its conversation. */
+  caseEpoch: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -183,6 +199,9 @@ export interface Assignment {
 
 export interface ConversationContext {
   conversationKey: string;
+  route: ConversationRoute;
+  /** Current intake case. Messages and questions from earlier cases are excluded below. */
+  caseEpoch: number;
   activeIncident: Incident | null;
   intakeRevision: number; // 0 when there is no active incident
   currentFacts: CallerFacts;
@@ -200,6 +219,7 @@ export interface ConversationContext {
 export interface PendingNotification {
   id: string;
   conversationKey: string;
+  route: ConversationRoute;
   incidentId: string | null;
   assignmentId: string | null;
   kind: NotificationKind;
