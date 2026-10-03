@@ -5,7 +5,7 @@
 //   npm run eval -- --only location-correction --no-write
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { CallerMessage, ExtractionOutcome, InboundTurn } from "../contract-types.ts";
+import type { CallerMessage, ExtractionOutcome, InboundTurn } from "@flare/contracts";
 import { createExtractor, DEFAULT_TIMEOUT_MS, type AttemptInfo } from "../extract.ts";
 import { emptyFacts, mergeFacts } from "../facts.ts";
 import { createGeminiGenerator } from "../gemini.ts";

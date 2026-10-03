@@ -18,10 +18,11 @@
     "models": "node src/cli/models.ts"
   },
   "dependencies": {
+    "@flare/contracts": "file:../contracts",
     "@google/genai": "2.27.0"
   },
   "devDependencies": {
-    "@types/node": "24.19.1",
-    "typescript": "7.0.2"
+    "@types/node": "^26.6.4",
+    "typescript": "^6.0.3"
   }
 }

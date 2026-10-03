@@ -1,7 +1,9 @@
 // Synthetic demonstration rules from docs/CONTRACT.md. These are fixture logic,
 // not clinical or operational triage guidance. Gemini never decides services.
 
-import type { CallerFacts, Recommendation, Service } from "./contract-types.ts";
+import { NO_RULE_REASON, type CallerFacts, type Recommendation, type Service } from "@flare/contracts";
+
+export { NO_RULE_REASON };
 
 interface DemoRule {
   id: string;
@@ -18,8 +20,6 @@ export const DEMO_RULES: readonly DemoRule[] = [
   { id: "DEMO_BREATHING", matches: (f) => f.callerReportedBreathing === false, services: ["EMS"], description: "caller reported someone not breathing" },
   { id: "DEMO_THREAT", matches: (f) => f.violentThreat === true, services: ["POLICE"], description: "caller reported a violent threat" },
 ];
-
-export const NO_RULE_REASON = "No demo rule matched; dispatcher review required.";
 
 const SERVICE_ORDER: readonly Service[] = ["POLICE", "FIRE", "EMS"];
 

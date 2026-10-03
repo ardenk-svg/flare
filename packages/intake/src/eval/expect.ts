@@ -2,7 +2,7 @@
 // left for human judgment and are reported, not asserted, except for the
 // explicit regex checks below.
 
-import type { CallerFactField, CallerFacts, ExtractionErrorCode, ExtractionOutcome, InboundTurn, Intent } from "../contract-types.ts";
+import type { CallerFactField, CallerFacts, ExtractionErrorCode, ExtractionOutcome, InboundTurn, Intent } from "@flare/contracts";
 import { mergeFacts } from "../facts.ts";
 import { recommendServices } from "../rules.ts";
 

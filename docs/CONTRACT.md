@@ -120,11 +120,11 @@ Null/missing facts match no rule. If none match, return an empty list with the r
 
 | Logical record | Minimum content |
 |---|---|
-| Incident | ID, conversation relation, facts/evidence, summary, intakeRevision, recommended services/reason, confirmed services, status, needsReview, createdAt/updatedAt |
+| Incident | ID, conversation relation, case epoch, facts/evidence, summary, intakeRevision, recommended services/reason, confirmed services, status, needsReview, extraction state/error, createdAt/updatedAt |
 | Unit | ID, service, AVAILABLE/BUSY |
 | Assignment | ID, incident ID, unit ID, assignment status, timestamps |
-| Conversation | Private routing identifiers, active incident ID, recent caller context, last sent question/delivery state |
-| Inbound message | Private conversation/message key, text, received timestamp, processing state/error, applied timestamp |
+| Conversation | Internal conversation key, durable provider route, current case epoch, active incident ID, last sent question/delivery state |
+| Inbound message | Private conversation/message key, case epoch, text, received timestamp, processing state/error, applied timestamp |
 | Notification | ID, destination conversation, incident/assignment reference, event kind, committed event data, delivery attempts/status |
 
 The records above are logical responsibilities; Person 3 may combine related storage when that simplifies the module without changing behavior. Do not duplicate private raw-message data into public subscription tables.
@@ -139,6 +139,17 @@ Inbound:    RECEIVED → APPLIED   (handled successfully; failed attempts remain
 Readiness requires a useful supported summary and nonempty `locationText`; optional caller facts may stay unknown. Before dispatch, accepted intake may move readiness in either direction if a correction removes location. After dispatch, keep the lifecycle intact and flag material fact changes for review. Recompute recommendations, but do not silently alter confirmed services or units.
 
 `intakeRevision` advances on accepted extraction results, including an accepted empty patch, and is separate from assignment/lifecycle updates. A status question alone need not advance it. Person 1 serializes extraction per conversation; Person 3 rejects stale expected revisions. On rejection, reload current context and retry the still-unapplied messages. Reserving an input for processing or recording a failure must not mark it APPLIED.
+
+### Durable route, intake cases, and extraction state
+
+- **Durable route.** `recordInbound` stores the latest verified `ConversationRoute { platform, spaceId, line }` on the conversation. For Spectrum iMessage, `spaceId` is `space.id` and `line` is the cloud line phone (`space.phone`), or null. Reopen the destination with the platform's `space.get(spaceId, …)` after a restart. Never store callbacks or rely on an old `space` object. The route is separate from `conversationKey` and is visible only to the agent.
+- **Intake case.** Each conversation has a `caseEpoch` that starts at 1, and each inbound message records the epoch it arrived in. `resolveIncident` advances the epoch and clears the last-question fields. Context reads, evidence validation and source IDs use only current-case messages. An earlier-case source fails with `STALE_CASE`, and earlier-case evidence fails with `UNKNOWN_EVIDENCE_MESSAGE`. Earlier rows stay stored as history.
+- **Extraction state.** An incident's `extractionState` is `OK | PENDING | FAILED`.
+  - Recording new input for an active incident sets `PENDING`.
+  - An accepted patch or a no-patch completion sets `OK` and clears the error, unless more current-case input is still RECEIVED, in which case the state stays `PENDING`.
+  - `recordExtractionFailure` sets `FAILED` with a sanitized error and leaves facts unchanged.
+  - When the first report fails before any incident exists, the failure appears as `lastExtractionError` in the agent's context.
+- **Startup work.** After reconnecting, the agent drains `listPendingConversationContexts` (current-case RECEIVED input) and `listPendingNotifications` (unsent jobs). Both carry the route.
 
 ## Application operations
 
@@ -171,20 +182,21 @@ Types live in `@flare/contracts` (`packages/contracts/src/index.ts`). Operations
 
 | Operation | `@flare/data` function | Notes |
 |---|---|---|
-| `recordInbound` | `recordInbound(conn, { provider, conversationKey, messages })` → `ConversationContext` | Dedupe key is provider + conversationKey + message ID |
-| Context read | `getConversationContext(conn, conversationKey)` | `intakeRevision` is `0` while there is no active incident; `pendingMessages` are RECEIVED |
+| `recordInbound` | `recordInbound(conn, { provider, conversationKey, route, messages })` → `ConversationContext` | Dedupe key is provider + conversationKey + message ID. Refreshes the route |
+| Context read | `getConversationContext(conn, conversationKey)` | Current case only. `intakeRevision` is `0` while there is no active incident; `pendingMessages` are RECEIVED |
+| Startup intake | `listPendingConversationContexts(conn)` | Every conversation with current-case RECEIVED input, oldest first |
 | `recordExtractionFailure` | `recordExtractionFailure(conn, { conversationKey, messageIds, error })` | |
 | `applyIntakePatch` | `applyIntakePatch(conn, { conversationKey, expectedRevision, sourceMessageIds, result, recommendation })` | REPORT/CORRECTION only. Evidence quotes must be exact substrings of a recorded message in the same conversation. New evidence for a field replaces older evidence for that field |
 | `completeInboundWithoutPatch` | `completeInboundWithoutPatch(conn, { conversationKey, messageIds, intent, replyText? })` | `replyText` is queued as an `INFO_REPLY` notification |
 | `recordSentQuestion` | `recordSentQuestion(conn, { conversationKey, question, delivered, error? })` | |
-| Pending notifications | `listPendingNotifications(conn)`, `onNotification(conn, cb)` | PENDING and FAILED jobs; each carries committed `text`, `eventAt`, `eventAssignmentStatus` |
+| Pending notifications | `listPendingNotifications(conn)`, `onNotification(conn, cb)` | PENDING and FAILED jobs. Each carries `route`, committed `text`, `eventAt` and `eventAssignmentStatus` |
 | `ackNotification` | `ackNotification(conn, { notificationId, delivered, error? })` | |
 | `confirmDispatchAndAssign` | `confirmDispatchAndAssign(conn, { incidentId, confirmedServices, unitIds })` | |
 | `advanceAssignment` | `advanceAssignment(conn, { assignmentId, nextStatus })` | `nextStatus` must be the next stage |
 | `resolveIncident` | `resolveIncident(conn, { incidentId })` | |
 | Reads | `listIncidents`, `listAssignments`, `listUnits`, `getMyRole` | Role-scoped: a responder sees only its unit's assignments and their incidents |
 
-Rejected operations throw `FlareOpError` with a `code`: `UNAUTHORIZED`, `NOT_FOUND`, `STALE_REVISION`, `PARTIALLY_APPLIED_SOURCES`, `UNKNOWN_MESSAGE`, `INVALID_INTENT`, `INVALID_FIELD`, `INVALID_VALUE_TYPE`, `MISSING_EVIDENCE`, `EVIDENCE_QUOTE_MISMATCH`, `UNKNOWN_EVIDENCE_MESSAGE`, `NOT_READY`, `ALREADY_DISPATCHED`, `UNIT_CONFLICT`, `UNIT_SERVICE_MISMATCH`, `SERVICE_WITHOUT_UNIT`, `INVALID_TRANSITION`, `ASSIGNMENTS_NOT_COMPLETED`, among others.
+Rejected operations throw `FlareOpError` with a `code`: `UNAUTHORIZED`, `NOT_FOUND`, `STALE_REVISION`, `STALE_CASE`, `INVALID_ROUTE`, `PARTIALLY_APPLIED_SOURCES`, `UNKNOWN_MESSAGE`, `INVALID_INTENT`, `INVALID_FIELD`, `INVALID_VALUE_TYPE`, `MISSING_EVIDENCE`, `EVIDENCE_QUOTE_MISMATCH`, `UNKNOWN_EVIDENCE_MESSAGE`, `NOT_READY`, `ALREADY_DISPATCHED`, `UNIT_CONFLICT`, `UNIT_SERVICE_MISMATCH`, `SERVICE_WITHOUT_UNIT`, `INVALID_TRANSITION`, `ASSIGNMENTS_NOT_COMPLETED`, among others.
 
 Roles are `ADMIN`, `AGENT`, `DISPATCHER`, and `RESPONDER` (bound to one unit). The identity that first publishes the module becomes `ADMIN` and grants the other roles by identity. An identity without a grant sees empty views and cannot call operations.
 
