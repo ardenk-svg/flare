@@ -2,7 +2,7 @@
 
 Flare is a ten-hour MHacks project for four teammates: a simulated incident report arrives through iMessage, Gemini extracts and updates caller-reported facts, and a dispatcher and responders coordinate through SpacetimeDB.
 
-**Current status:** this repository contains the build handoff and role guides. Application code, credentials, executable scripts, and integrations have not been implemented or verified yet. The concept was called Dispatch in the original handoff; use Flare in this repository.
+**Current status:** Person 1's initial TypeScript workspace and Photon Spectrum agent slice are in progress. A terminal-provider harness and cloud iMessage entrypoint share one normalized handler; live iMessage access is not yet verified. Gemini, SpacetimeDB, and web application work remain owned by their respective workstreams. The concept was called Dispatch in the original handoff; use Flare in this repository.
 
 ## Start here
 
@@ -25,6 +25,18 @@ The shared [CLAUDE.md](CLAUDE.md) gives coding sessions the same project constra
 
 Spend 30 minutes agreeing on the contract, creating the TypeScript workspace, and verifying actual access to Photon, Gemini, and SpacetimeDB. Person 1 coordinates root configuration; Person 3 owns contract and schema changes. Implement a complete live loop by hour three and merge working slices throughout the event.
 
-The future implementation layout and target scripts are described in the handoff. They are not present or runnable yet. As each workstream ships, add its tested setup commands and environment variable names to its own `HANDOFF.md` and update this README with a verified quickstart.
+## Person 1 quickstart
+
+With Node.js 20 or newer:
+
+```sh
+npm install
+npm run check
+npm run agent:terminal
+```
+
+The terminal harness is a development fallback, not evidence of live iMessage delivery. For the cloud iMessage worker, set `SPECTRUM_PROJECT_ID` and `SPECTRUM_PROJECT_SECRET` locally and run `npm run agent:imessage`. See [the agent handoff](apps/agent/HANDOFF.md) for verified scope and known gaps.
+
+The remaining target layout and scripts are described in the handoff. As each workstream ships, add its tested setup commands and environment variable names to its own `HANDOFF.md` and update this README with a verified quickstart.
 
 This is a simulation. It does not contact real emergency services or provide operational triage guidance.
