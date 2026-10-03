@@ -7,4 +7,12 @@ const app = await Spectrum({
   providers: [terminal.config({})],
 });
 
-await runAgent(app);
+const provider = terminal(app);
+
+await runAgent(app, async (route, text) => {
+  if (route.platform !== "terminal") {
+    throw new Error(`The terminal worker cannot send a ${route.platform} notification.`);
+  }
+  const space = await provider.space.get(route.spaceId);
+  await space.send(text);
+});

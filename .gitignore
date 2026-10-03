@@ -4,5 +4,6 @@ coverage/
 .env
 .env.*
 !.env.example
+.flare/
 *.log
 .DS_Store

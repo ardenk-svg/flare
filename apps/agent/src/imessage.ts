@@ -19,4 +19,15 @@ const app = await Spectrum({
   providers: [imessage.config({})],
 });
 
-await runAgent(app);
+const provider = imessage(app);
+
+await runAgent(app, async (route, text) => {
+  if (route.platform !== "imessage") {
+    throw new Error(`The iMessage worker cannot send a ${route.platform} notification.`);
+  }
+  const space = await provider.space.get(
+    route.spaceId,
+    route.phone ? { phone: route.phone } : {},
+  );
+  await space.send(text);
+});

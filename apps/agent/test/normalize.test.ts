@@ -22,6 +22,29 @@ test("normalizes a trusted inbound Spectrum text message", () => {
     senderId: "+15555550123",
     text: "  Simulation: smoke outside.  ",
     receivedAt: "2026-10-03T12:34:56.000Z",
+    route: {
+      platform: "imessage",
+      spaceId: "conversation-7",
+    },
+  });
+});
+
+test("preserves the iMessage line discriminator needed to reopen a route", () => {
+  const result = normalizeInboundMessage(
+    { id: "conversation-7", phone: "+15555550000" },
+    {
+      id: "message-10",
+      platform: "imessage",
+      direction: "inbound",
+      timestamp: new Date("2026-10-03T12:34:56.000Z"),
+      content: { type: "text", text: "Any update?" },
+    },
+  );
+
+  assert.deepEqual(result?.route, {
+    platform: "imessage",
+    spaceId: "conversation-7",
+    phone: "+15555550000",
   });
 });
 

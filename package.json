@@ -5,7 +5,7 @@
   "packageManager": "npm@11.19.1",
   "description": "A clearly labelled incident-response coordination simulation.",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.18"
   },
   "workspaces": [
     "apps/*",
@@ -14,8 +14,13 @@
   "scripts": {
     "agent:terminal": "npm run dev:terminal --workspace @flare/agent",
     "agent:imessage": "npm run dev:imessage --workspace @flare/agent",
+    "agent:echo:terminal": "npm run dev:echo:terminal --workspace @flare/agent",
+    "agent:echo:imessage": "npm run dev:echo:imessage --workspace @flare/agent",
     "build": "npm run build --workspaces --if-present",
     "check": "npm run typecheck && npm test && npm run build",
+    "check:data:live": "npm run check --workspace @flare/data",
+    "check:module": "npm run typecheck --prefix spacetime && npm run build --prefix spacetime",
+    "install:module": "npm ci --prefix spacetime --ignore-scripts --no-audit --no-fund",
     "test": "npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
