@@ -1,0 +1,27 @@
+{
+  "name": "@flare/intake",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Flare caller-fact extraction (Gemini) and synthetic demo recommendation rules",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "smoke": "node src/cli/smoke.ts",
+    "eval": "node src/cli/eval.ts",
+    "models": "node src/cli/models.ts"
+  },
+  "dependencies": {
+    "@google/genai": "2.27.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.1",
+    "typescript": "7.0.2"
+  }
+}

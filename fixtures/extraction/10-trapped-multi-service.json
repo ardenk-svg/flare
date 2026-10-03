@@ -1,0 +1,43 @@
+{
+  "id": "trapped-multi-service",
+  "description": "Separate multi-assignment fixture: matches DEMO_TRAPPED (FIRE + EMS).",
+  "covers": [
+    "multi-assignment",
+    "rules"
+  ],
+  "turn": {
+    "messages": [
+      "Simulation: fire on the 3rd floor of the demo dorm, north stairwell. Someone is trapped in a room and my roommate burned her hand."
+    ]
+  },
+  "expect": {
+    "intent": "REPORT",
+    "patch": {
+      "fireOrSmoke": {
+        "is": true
+      },
+      "trappedPerson": {
+        "is": true
+      },
+      "injuryReported": {
+        "is": true
+      },
+      "locationText": {
+        "contains": [
+          "dorm"
+        ]
+      }
+    },
+    "recommendation": {
+      "services": [
+        "FIRE",
+        "EMS"
+      ],
+      "ruleIds": [
+        "DEMO_FIRE",
+        "DEMO_TRAPPED",
+        "DEMO_INJURY"
+      ]
+    }
+  }
+}

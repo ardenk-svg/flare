@@ -1,0 +1,54 @@
+{
+  "id": "retry-then-valid",
+  "description": "Invalid first output, valid second output: one bounded retry succeeds.",
+  "covers": [
+    "malformed output",
+    "retry"
+  ],
+  "turn": {
+    "currentFacts": {
+      "incidentType": "smoke",
+      "fireOrSmoke": true,
+      "locationText": "North entrance of the demo student center"
+    },
+    "currentSummary": "Caller reports smoke at the north entrance of the demo student center.",
+    "messages": [
+      "Correction: south entrance, not north."
+    ]
+  },
+  "model": {
+    "sequence": [
+      {
+        "raw": "not json"
+      },
+      {
+        "output": {
+          "intent": "CORRECTION",
+          "changes": [
+            {
+              "field": "locationText",
+              "kind": "TEXT",
+              "text": "South entrance of the demo student center",
+              "messageId": "m1",
+              "quote": "south entrance, not north"
+            }
+          ],
+          "summary": "Caller reports smoke at the south entrance of the demo student center.",
+          "unresolvedFields": [],
+          "proposedQuestion": ""
+        }
+      }
+    ]
+  },
+  "expect": {
+    "intent": "CORRECTION",
+    "patch": {
+      "locationText": {
+        "contains": [
+          "south"
+        ]
+      }
+    },
+    "attempts": 2
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "id": "violent-threat",
+  "description": "Threat report maps to POLICE through rules, not through the model.",
+  "covers": [
+    "rules"
+  ],
+  "turn": {
+    "messages": [
+      "Simulation: someone is waving a knife and yelling at people on level 2 of the demo parking garage."
+    ]
+  },
+  "expect": {
+    "intent": "REPORT",
+    "patch": {
+      "violentThreat": {
+        "is": true
+      },
+      "locationText": {
+        "contains": [
+          "level 2",
+          "garage"
+        ]
+      }
+    },
+    "recommendation": {
+      "services": [
+        "POLICE"
+      ],
+      "ruleIds": [
+        "DEMO_THREAT"
+      ]
+    }
+  }
+}

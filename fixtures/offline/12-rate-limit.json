@@ -1,0 +1,25 @@
+{
+  "id": "rate-limit",
+  "description": "HTTP 429 maps to RATE_LIMIT and is retryable.",
+  "covers": [
+    "API failure"
+  ],
+  "turn": {
+    "currentFacts": {
+      "incidentType": "smoke",
+      "fireOrSmoke": true,
+      "locationText": "North entrance of the demo student center"
+    },
+    "currentSummary": "Caller reports smoke at the north entrance of the demo student center.",
+    "messages": [
+      "Correction: south entrance, not north."
+    ]
+  },
+  "model": {
+    "throwStatus": 429
+  },
+  "expect": {
+    "errorCode": "RATE_LIMIT",
+    "retryable": true
+  }
+}

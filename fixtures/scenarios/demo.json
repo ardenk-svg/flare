@@ -1,0 +1,107 @@
+{
+  "id": "demo",
+  "description": "The contract's synthetic demo conversation, threaded turn by turn through live extraction. Facts, summary, revision and last question carry forward exactly as the agent would carry them.",
+  "steps": [
+    {
+      "messages": [
+        "Simulation: I see smoke outside."
+      ],
+      "expect": {
+        "intent": "REPORT",
+        "merged": {
+          "fireOrSmoke": {
+            "is": true
+          },
+          "locationText": "unknown"
+        },
+        "question": {
+          "match": "build|entrance|where|location"
+        },
+        "recommendation": {
+          "services": [
+            "FIRE"
+          ],
+          "ruleIds": [
+            "DEMO_FIRE"
+          ]
+        }
+      }
+    },
+    {
+      "messages": [
+        "North entrance of the demo student center."
+      ],
+      "expect": {
+        "merged": {
+          "locationText": {
+            "contains": [
+              "north",
+              "student center"
+            ]
+          },
+          "fireOrSmoke": {
+            "is": true
+          }
+        },
+        "recommendation": {
+          "services": [
+            "FIRE"
+          ],
+          "ruleIds": [
+            "DEMO_FIRE"
+          ]
+        }
+      }
+    },
+    {
+      "messages": [
+        "Correction: south entrance, not north."
+      ],
+      "expect": {
+        "intent": "CORRECTION",
+        "merged": {
+          "locationText": {
+            "contains": [
+              "south",
+              "student center"
+            ],
+            "notContains": [
+              "north"
+            ]
+          },
+          "fireOrSmoke": {
+            "is": true
+          }
+        },
+        "corrections": {
+          "includes": [
+            "locationText"
+          ]
+        },
+        "evidence": {
+          "locationText": "current"
+        },
+        "recommendation": {
+          "services": [
+            "FIRE"
+          ],
+          "ruleIds": [
+            "DEMO_FIRE"
+          ]
+        }
+      }
+    },
+    {
+      "messages": [
+        "Any update?"
+      ],
+      "expect": {
+        "intent": "STATUS_QUERY",
+        "patchEmpty": true,
+        "question": {
+          "null": true
+        }
+      }
+    }
+  ]
+}

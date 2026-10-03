@@ -1,0 +1,34 @@
+{
+  "id": "uncertain-trapped",
+  "description": "\"I don't know whether anyone is inside\" must not become trappedPerson false.",
+  "covers": [
+    "uncertainty"
+  ],
+  "turn": {
+    "currentFacts": {
+      "incidentType": "fire",
+      "fireOrSmoke": true,
+      "locationText": "East entrance of the demo library"
+    },
+    "currentSummary": "Caller reports a fire at the east entrance of the demo library.",
+    "lastQuestion": "Is anyone trapped inside?",
+    "messages": [
+      "I don't know whether anyone is inside."
+    ]
+  },
+  "expect": {
+    "patch": {
+      "trappedPerson": "unknown",
+      "fireOrSmoke": "absent",
+      "locationText": "absent"
+    },
+    "unresolved": {
+      "includes": [
+        "trappedPerson"
+      ]
+    },
+    "question": {
+      "notMatch": "trapped|inside"
+    }
+  }
+}

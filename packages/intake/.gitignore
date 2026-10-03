@@ -1,0 +1,6 @@
+node_modules/
+# Root lockfile is owned by Person 1; do not commit a package-local one.
+package-lock.json
+
+# Local secrets (GEMINI_API_KEY). Never commit.
+.env

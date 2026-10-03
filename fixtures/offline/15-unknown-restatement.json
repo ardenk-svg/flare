@@ -1,0 +1,42 @@
+{
+  "id": "unknown-restatement",
+  "description": "\"I don't know\" emitted as UNKNOWN on an already-null field is a no-op, not a change.",
+  "covers": [
+    "uncertainty"
+  ],
+  "turn": {
+    "currentFacts": {
+      "fireOrSmoke": true
+    },
+    "lastQuestion": "Is anyone injured?",
+    "messages": [
+      "I don't know"
+    ]
+  },
+  "model": {
+    "output": {
+      "intent": "REPORT",
+      "changes": [
+        {
+          "field": "injuryReported",
+          "kind": "UNKNOWN",
+          "messageId": "m1",
+          "quote": "I don't know"
+        }
+      ],
+      "summary": "Caller reports smoke; unknown whether anyone is injured.",
+      "unresolvedFields": [
+        "injuryReported"
+      ],
+      "proposedQuestion": ""
+    }
+  },
+  "expect": {
+    "patchEmpty": true,
+    "unresolved": {
+      "includes": [
+        "injuryReported"
+      ]
+    }
+  }
+}

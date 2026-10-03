@@ -1,0 +1,146 @@
+{
+  "description": "Deterministic checks of recommendServices against the contract's demo rule table. Facts not listed are null.",
+  "cases": [
+    {
+      "id": "all-null",
+      "facts": {},
+      "services": [],
+      "ruleIds": []
+    },
+    {
+      "id": "fire",
+      "facts": {
+        "fireOrSmoke": true
+      },
+      "services": [
+        "FIRE"
+      ],
+      "ruleIds": [
+        "DEMO_FIRE"
+      ]
+    },
+    {
+      "id": "fire-false",
+      "facts": {
+        "fireOrSmoke": false
+      },
+      "services": [],
+      "ruleIds": []
+    },
+    {
+      "id": "trapped",
+      "facts": {
+        "trappedPerson": true
+      },
+      "services": [
+        "FIRE",
+        "EMS"
+      ],
+      "ruleIds": [
+        "DEMO_TRAPPED"
+      ]
+    },
+    {
+      "id": "trapped-false",
+      "facts": {
+        "trappedPerson": false
+      },
+      "services": [],
+      "ruleIds": []
+    },
+    {
+      "id": "injury",
+      "facts": {
+        "injuryReported": true
+      },
+      "services": [
+        "EMS"
+      ],
+      "ruleIds": [
+        "DEMO_INJURY"
+      ]
+    },
+    {
+      "id": "not-conscious",
+      "facts": {
+        "callerReportedConscious": false
+      },
+      "services": [
+        "EMS"
+      ],
+      "ruleIds": [
+        "DEMO_CONSCIOUS"
+      ]
+    },
+    {
+      "id": "conscious-true",
+      "facts": {
+        "callerReportedConscious": true
+      },
+      "services": [],
+      "ruleIds": []
+    },
+    {
+      "id": "not-breathing",
+      "facts": {
+        "callerReportedBreathing": false
+      },
+      "services": [
+        "EMS"
+      ],
+      "ruleIds": [
+        "DEMO_BREATHING"
+      ]
+    },
+    {
+      "id": "breathing-true",
+      "facts": {
+        "callerReportedBreathing": true
+      },
+      "services": [],
+      "ruleIds": []
+    },
+    {
+      "id": "threat",
+      "facts": {
+        "violentThreat": true
+      },
+      "services": [
+        "POLICE"
+      ],
+      "ruleIds": [
+        "DEMO_THREAT"
+      ]
+    },
+    {
+      "id": "union",
+      "facts": {
+        "fireOrSmoke": true,
+        "trappedPerson": true,
+        "injuryReported": true,
+        "violentThreat": true
+      },
+      "services": [
+        "POLICE",
+        "FIRE",
+        "EMS"
+      ],
+      "ruleIds": [
+        "DEMO_FIRE",
+        "DEMO_TRAPPED",
+        "DEMO_INJURY",
+        "DEMO_THREAT"
+      ]
+    },
+    {
+      "id": "text-only",
+      "facts": {
+        "incidentType": "fire",
+        "locationText": "North entrance of the demo library",
+        "peopleInvolved": 3
+      },
+      "services": [],
+      "ruleIds": []
+    }
+  ]
+}

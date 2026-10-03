@@ -1,0 +1,25 @@
+{
+  "id": "malformed-json",
+  "description": "Non-JSON output is rejected on every attempt.",
+  "covers": [
+    "malformed output"
+  ],
+  "turn": {
+    "currentFacts": {
+      "incidentType": "smoke",
+      "fireOrSmoke": true,
+      "locationText": "North entrance of the demo student center"
+    },
+    "currentSummary": "Caller reports smoke at the north entrance of the demo student center.",
+    "messages": [
+      "Correction: south entrance, not north."
+    ]
+  },
+  "model": {
+    "raw": "Sure! Here is the JSON: {intent: CORRECTION"
+  },
+  "expect": {
+    "errorCode": "INVALID_OUTPUT",
+    "retryable": true
+  }
+}

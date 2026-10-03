@@ -1,0 +1,44 @@
+{
+  "id": "location-answer",
+  "description": "Demo step 3: caller answers the building/entrance question.",
+  "covers": [
+    "answer to last question",
+    "demo fixture"
+  ],
+  "turn": {
+    "currentFacts": {
+      "incidentType": "smoke",
+      "fireOrSmoke": true
+    },
+    "currentSummary": "Caller reports seeing smoke outside. Location not yet provided.",
+    "lastQuestion": "What building and entrance are you at?",
+    "recentMessages": [
+      "Simulation: I see smoke outside."
+    ],
+    "messages": [
+      "North entrance of the demo student center."
+    ]
+  },
+  "expect": {
+    "intent": "REPORT",
+    "patch": {
+      "locationText": {
+        "contains": [
+          "north",
+          "student center"
+        ]
+      },
+      "fireOrSmoke": "absent"
+    },
+    "corrections": {
+      "excludes": [
+        "locationText"
+      ]
+    },
+    "merged": {
+      "fireOrSmoke": {
+        "is": true
+      }
+    }
+  }
+}
