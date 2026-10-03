@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev:imessage": "tsx src/imessage.ts",
+    "dev:imessage": "node --env-file=../../.env --import tsx src/imessage.ts",
     "dev:terminal": "tsx src/terminal.ts",
-    "start:imessage": "node dist/imessage.js",
+    "start:imessage": "node --env-file=../../.env dist/imessage.js",
     "start:terminal": "node dist/terminal.js",
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"

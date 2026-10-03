@@ -39,9 +39,10 @@ Verified on 2026-10-03:
 
 - `npm run check` passed typechecking, 4/4 focused tests, and the production build.
 - `npm run start:terminal --workspace @flare/agent` opened the Spectrum terminal TUI; sending `test` produced the labelled simulation echo through the common handler, and Ctrl-C shut it down cleanly.
+- `npm run agent:imessage` loaded the ignored root `.env`, authenticated, started the `imessage` provider, and reached the listening state. A real phone send/receive is still pending.
 
 The automated checks cover normalization, filtering, preservation of original source text, queue ordering, failure recovery, TypeScript compilation, and the production build.
 
-Live iMessage receive/send is **not verified** until a provisioned Photon project and real phone are available. The terminal harness does not satisfy the real-iMessage acceptance criterion. The current worker also has no persistent receipt store, extraction, SpacetimeDB state, notification consumer, or external-send acknowledgment. Spectrum delivery idempotency is not assumed.
+Live iMessage receive/send is **not verified** until a real phone exchanges a message with the connected worker. The terminal harness and successful provider startup do not satisfy that acceptance criterion. The current worker also has no persistent receipt store, extraction, SpacetimeDB state, notification consumer, or external-send acknowledgment. Spectrum delivery idempotency is not assumed.
 
 `npm audit --omit=dev` currently reports 18 moderate findings in Spectrum's transitive `@photon-ai/otel` / OpenTelemetry dependency chain. npm offers only a breaking downgrade as an automatic fix, so this slice leaves the pinned current Spectrum version intact and records the issue for upstream/version review.

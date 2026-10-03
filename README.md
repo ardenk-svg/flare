@@ -2,7 +2,7 @@
 
 Flare is a ten-hour MHacks project for four teammates: a simulated incident report arrives through iMessage, Gemini extracts and updates caller-reported facts, and a dispatcher and responders coordinate through SpacetimeDB.
 
-**Current status:** Person 1's initial TypeScript workspace and Photon Spectrum agent slice are in progress. A terminal-provider harness and cloud iMessage entrypoint share one normalized handler; live iMessage access is not yet verified. Gemini, SpacetimeDB, and web application work remain owned by their respective workstreams. The concept was called Dispatch in the original handoff; use Flare in this repository.
+**Current status:** Person 1's initial TypeScript workspace and Photon Spectrum agent slice are in progress. A terminal-provider harness and cloud iMessage entrypoint share one normalized handler. Photon cloud authentication and provider startup are verified; a real phone message round-trip is still pending. Gemini, SpacetimeDB, and web application work remain owned by their respective workstreams. The concept was called Dispatch in the original handoff; use Flare in this repository.
 
 ## Start here
 
