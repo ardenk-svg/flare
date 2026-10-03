@@ -8,25 +8,23 @@ Gemini caller-fact extraction (`extractTurn`) and the synthetic demo recommendat
 |---|---|
 | `npm run typecheck` | Passes (TypeScript 7.0.2, strict) |
 | `npm test` (offline, no network) | 39/39 pass: 13 rule cases, merge/quote checks, 15 canned-output contract fixtures |
-| Real network path | Verified with a deliberately invalid key: the SDK reached Google, HTTP 400 mapped to non-retryable `PROVIDER_ERROR` in about 180 ms |
-| **Live Gemini extraction** | **Not run yet.** No `GEMINI_API_KEY` was available. That means Gemini has not yet accepted the response schema and there are no live fixture results. |
+| Real network path | Key/model discovery and a structured-output smoke extraction passed against Google |
+| **Live Gemini extraction** | **20/20 passed** on `gemini-3.5-flash-lite`: 16 fixtures plus 4 threaded demo steps, p50 1101 ms and p95 2594 ms |
 
-Team decision (2026-10-03): the shared Gemini key is not handed out yet. It will be added at deploy time. Until then, `extractTurn` returns a non-retryable `PROVIDER_ERROR` ("GEMINI_API_KEY is not set") and does not throw, so the agent's failure path can be built and tested without a key. When the key is available, run `npm run models`, `npm run smoke` and `npm run eval`, then record the model and report path here.
+The lowest-priced legacy model listed for this key returned 404 for generation, and `gemini-3.1-flash-lite` produced intermittent 503s during sustained evaluation. The selected `gemini-3.5-flash-lite` model was reliable and substantially faster. The final evaluation was paced at 5000 ms between case starts to stay below the observed request quota. The report is [2026-10-03T21-48-23-gemini-3.5-flash-lite.md](../../fixtures/results/2026-10-03T21-48-23-gemini-3.5-flash-lite.md).
 
 ## Setup
 
 Requires Node ≥ 22.18. Built and tested on Node 24.21.0. The source is erasable-only TypeScript and runs directly on Node; no tsx or build step is needed.
 
 ```sh
-cd packages/intake
-npm install          # until Person 1's root workspace exists; no package lockfile is committed
-npm run typecheck
-npm test             # OFFLINE contract checks, no API key needed
-npm run models       # LIVE: list Flash models your key can call
-npm run smoke        # LIVE: one real extraction of demo step 1
-npm run smoke -- "Simulation: there is smoke at the north entrance of the demo library"
-npm run eval         # LIVE: all fixtures + threaded demo scenario → fixtures/results/<time>-<model>.{md,json}
-npm run eval -- --only location-correction --no-write
+npm ci --ignore-scripts --no-audit --no-fund
+npm run typecheck --workspace @flare/intake
+npm test --workspace @flare/intake             # OFFLINE contract checks
+npm run models --workspace @flare/intake        # LIVE: list available Flash models
+npm run smoke --workspace @flare/intake         # LIVE: one real extraction
+npm run eval --workspace @flare/intake          # LIVE: fixtures + threaded demo
+npm run eval --workspace @flare/intake -- --only location-correction --no-write
 ```
 
 The CLIs read `.env` from the repo root or `packages/intake/.env` if one exists. Real environment variables take precedence.
@@ -37,8 +35,9 @@ The CLIs read `.env` from the repo root or `packages/intake/.env` if one exists.
 | `GEMINI_MODEL` | yes | Tested stable Flash model ID. There is no built-in default; pick one from `npm run models`. On 2026-10-03 the [models page](https://ai.google.dev/gemini-api/docs/models) listed `gemini-3.x-flash` IDs as stable. |
 | `GEMINI_TIMEOUT_MS` | no | Deadline per model attempt (default 15000) |
 | `GEMINI_THINKING_LEVEL` | no | e.g. `LOW`/`MINIMAL`, only if the chosen model supports thinking levels (latency tuning) |
+| `GEMINI_EVAL_DELAY_MS` | no | Minimum delay between live evaluation case starts; 5000 ms was used for the committed report |
 
-Person 1: add these names to `.env.example`.
+The names and tested non-secret defaults are present in the root `.env.example`.
 
 ## Interface (for Person 1)
 
@@ -97,7 +96,7 @@ Error mapping: our deadline, 408 or 504 → `TIMEOUT`; 429 → `RATE_LIMIT`; 5xx
 See [fixtures/README.md](../../fixtures/README.md). There are 16 live extraction fixtures, a 4-step threaded demo scenario, 15 offline canned-output fixtures and 13 rule cases.
 
 Open items:
-- [ ] Run the live checks: models, smoke, eval. Commit the report and record the model, pass rate and p50/p95 latency here.
-- [ ] Tune the prompt for any live failures, especially the north→south correction and keeping "I don't know" as unknown rather than false.
+- [x] Run the live checks: models, smoke, eval. Commit the report and record the model, pass rate and p50/p95 latency here.
+- [x] Tune the prompt for the live correction, uncertainty, explicit fire/smoke, and no-inferred-injury cases.
 - [ ] Human review of summaries and questions in the eval report.
 - [ ] Integrate with Person 1's agent and run the full loop. Then complete the acceptance checklist in [docs/DEMO.md](../../docs/DEMO.md).

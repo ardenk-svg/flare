@@ -31,10 +31,19 @@ const only = args.includes("--only") ? args[args.indexOf("--only") + 1] : undefi
 const write = !args.includes("--no-write");
 const config = requireGeminiConfig();
 const timeoutMs = Number(process.env.GEMINI_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS;
+const evalDelayMs = Math.max(0, Number(process.env.GEMINI_EVAL_DELAY_MS) || 0);
 const generate = createGeminiGenerator(config);
 const modelVersions = new Set<string>();
+let lastCaseStartedAt = 0;
+
+async function paceEvaluation(): Promise<void> {
+  const waitMs = lastCaseStartedAt + evalDelayMs - Date.now();
+  if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+  lastCaseStartedAt = Date.now();
+}
 
 async function runCase(id: string, covers: string[], turn: InboundTurn, expect: Expectation): Promise<{ record: CaseRecord; outcome: ExtractionOutcome }> {
+  await paceEvaluation();
   const attempts: AttemptInfo[] = [];
   const extract = createExtractor({ generate, timeoutMs, onAttempt: (a) => attempts.push(a) });
   const outcome = await extract(turn);
@@ -118,6 +127,7 @@ if (write && !only) {
     modelVersions: [...modelVersions],
     thinkingLevel: config.thinkingLevel ?? null,
     timeoutMs,
+    evalDelayMs,
     fixtureCount: cases.length,
     scenarioSteps: scenarioRecords.length,
     passed,
@@ -141,6 +151,7 @@ if (write && !only) {
       `- GEMINI_MODEL: \`${config.model}\` (reported modelVersion: ${summary.modelVersions.join(", ") || "not reported"})`,
       `- Automated assertions: **${passed}/${all.length} passed** (${cases.length} fixtures + ${scenarioRecords.length} demo scenario steps)`,
       `- Latency per turn (incl. validation retries): p50 ${summary.latencyMs.p50} ms, p95 ${summary.latencyMs.p95} ms, max ${summary.latencyMs.max} ms`,
+      `- Minimum delay between case starts: ${summary.evalDelayMs} ms`,
       `- Turns needing a validation retry: ${retried}`,
       ``,
       `## Fixtures`,
