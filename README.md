@@ -2,7 +2,7 @@
 
 Flare is a ten-hour MHacks project for four teammates: a simulated incident report arrives through iMessage, Gemini extracts and updates caller-reported facts, and a dispatcher and responders coordinate through SpacetimeDB.
 
-**Current status:** Person 1's initial TypeScript workspace and Photon Spectrum agent slice are in progress. A terminal-provider harness and cloud iMessage entrypoint share one normalized handler. Photon cloud authentication and provider startup are verified; a real phone message round-trip is still pending. Gemini, SpacetimeDB, and web application work remain owned by their respective workstreams. The concept was called Dispatch in the original handoff; use Flare in this repository.
+**Current status:** the merged npm workspace installs reproducibly, and Person 1's agent now connects Spectrum to the intake and data packages, retries stale/pending intake, answers status from committed state, and drains asynchronous notification jobs through durable local routes. Photon cloud startup is verified. The supplied Maincloud database does not yet expose the Flare schema, no Google Gemini API key is configured, and a real phone message round-trip is still pending. See [NEXT_STEPS.md](NEXT_STEPS.md) for the shared integration board.
 
 ## Start here
 
@@ -25,18 +25,28 @@ The shared [CLAUDE.md](CLAUDE.md) gives coding sessions the same project constra
 
 Spend 30 minutes agreeing on the contract, creating the TypeScript workspace, and verifying actual access to Photon, Gemini, and SpacetimeDB. Person 1 coordinates root configuration; Person 3 owns contract and schema changes. Implement a complete live loop by hour three and merge working slices throughout the event.
 
-## Person 1 quickstart
+## Team quickstart
 
-With Node.js 20 or newer:
+Use Node.js 22.18 or newer. Create an ignored root `.env` from `.env.example`, keep all values local, then run:
 
 ```sh
-npm install
+npm ci --ignore-scripts --no-audit --no-fund
 npm run check
+npm run agent:echo:terminal   # labelled transport diagnostic only
 npm run agent:terminal
 ```
 
-The terminal harness is a development fallback, not evidence of live iMessage delivery. For the cloud iMessage worker, set `SPECTRUM_PROJECT_ID` and `SPECTRUM_PROJECT_SECRET` locally and run `npm run agent:imessage`. See [the agent handoff](apps/agent/HANDOFF.md) for verified scope and known gaps.
+`agent:terminal` and `agent:imessage` run the integrated Gemini/SpacetimeDB worker. `agent:echo:terminal` and `agent:echo:imessage` are explicitly labelled transport-only diagnostics and never create incident state. See [the agent handoff](apps/agent/HANDOFF.md) for environment names, verified behavior, and current external blockers.
 
-The remaining target layout and scripts are described in the handoff. As each workstream ships, add its tested setup commands and environment variable names to its own `HANDOFF.md` and update this README with a verified quickstart.
+The SpacetimeDB module keeps its own lockfile and toolchain:
+
+```sh
+npm run install:module
+npm run check:module
+```
+
+`check:module` requires the `spacetime` CLI. The destructive local adapter checks are intentionally separate: start the agreed local database, then run `npm run check:data:live`.
+
+For cloud iMessage, set `SPECTRUM_PROJECT_ID` and `SPECTRUM_PROJECT_SECRET` locally and run `npm run agent:imessage`. The terminal path remains a development aid and does not satisfy the live-phone acceptance criterion.
 
 This is a simulation. It does not contact real emergency services or provide operational triage guidance.

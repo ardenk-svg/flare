@@ -2,6 +2,7 @@ import type { NormalizedInboundMessage } from "./types.js";
 
 export interface SpectrumSpaceEnvelope {
   readonly id: string;
+  readonly phone?: string;
 }
 
 export interface SpectrumMessageEnvelope {
@@ -49,5 +50,10 @@ export function normalizeInboundMessage(
     senderId: message.sender?.id ?? null,
     text,
     receivedAt: message.timestamp.toISOString(),
+    route: {
+      platform: message.platform,
+      spaceId: space.id,
+      ...(space.phone ? { phone: space.phone } : {}),
+    },
   };
 }

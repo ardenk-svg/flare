@@ -4,15 +4,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "dev:imessage": "node --env-file=../../.env --import tsx src/imessage.ts",
-    "dev:terminal": "tsx src/terminal.ts",
-    "start:imessage": "node --env-file=../../.env dist/imessage.js",
-    "start:terminal": "node dist/terminal.js",
+    "build": "tsc -p tsconfig.json --noEmit",
+    "dev:echo:imessage": "node --env-file-if-exists=../../.env --import tsx src/imessage-echo.ts",
+    "dev:echo:terminal": "tsx src/terminal-echo.ts",
+    "dev:imessage": "node --env-file-if-exists=../../.env --import tsx src/imessage.ts",
+    "dev:terminal": "node --env-file-if-exists=../../.env --import tsx src/terminal.ts",
+    "start:echo:imessage": "node --env-file-if-exists=../../.env --import tsx src/imessage-echo.ts",
+    "start:echo:terminal": "node --import tsx src/terminal-echo.ts",
+    "start:imessage": "node --env-file-if-exists=../../.env --import tsx src/imessage.ts",
+    "start:terminal": "node --env-file-if-exists=../../.env --import tsx src/terminal.ts",
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@flare/contracts": "0.1.0",
+    "@flare/data": "0.1.0",
+    "@flare/intake": "0.1.0",
     "@spectrum-ts/core": "12.10.1",
     "@spectrum-ts/imessage": "12.10.1",
     "@spectrum-ts/terminal": "12.10.1"
