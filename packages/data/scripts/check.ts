@@ -16,6 +16,7 @@ import {
   listPendingConversationContexts,
   listPendingNotifications,
   listUnits,
+  closeIncident,
   recordExtractionFailure,
   recordInbound,
   recordSentQuestion,
@@ -295,6 +296,45 @@ async function main() {
   check('two simultaneous reservations: exactly one succeeds', wins === 1);
   check('loser receives explicit UNIT_CONFLICT', conflict?.reason instanceof FlareOpError && conflict.reason.code === 'UNIT_CONFLICT');
   check('losing incident unchanged', listIncidents(dispatcher.conn).filter(i => ready.includes(i.id) && i.status === 'READY_FOR_REVIEW').length === 1);
+
+  // --- Close without dispatch (issue #15) ---
+  const KEY5 = 'check:conversation-5';
+  await recordInbound(A, { provider: 'check', conversationKey: KEY5, route: route(KEY5), messages: [msg('c1', 'Simulation: just testing, I see smoke.')] });
+  await applyIntakePatch(A, {
+    conversationKey: KEY5, expectedRevision: 0, sourceMessageIds: ['c1'],
+    result: result('REPORT', { fireOrSmoke: true }, [{ field: 'fireOrSmoke', messageId: 'c1', quote: 'I see smoke' }], 'Caller says they see smoke; location unknown.'),
+    recommendation: FIRE_REC,
+  });
+  await recordSentQuestion(A, { conversationKey: KEY5, question: 'Where are you?', delivered: true });
+  const collecting = getConversationContext(A, KEY5)!.activeIncident!;
+  await waitFor('dispatcher sees collecting incident', () => listIncidents(dispatcher.conn).some(i => i.id === collecting.id));
+  await rejects('responder cannot close', closeIncident(fire.conn, { incidentId: collecting.id, reason: 'test' }), 'UNAUTHORIZED');
+  await rejects('agent cannot close', closeIncident(A, { incidentId: collecting.id, reason: 'test' }), 'UNAUTHORIZED');
+  await rejects('close requires a reason', closeIncident(dispatcher.conn, { incidentId: collecting.id, reason: '  ' }), 'REASON_REQUIRED');
+  await rejects('dispatched incident cannot be closed', closeIncident(dispatcher.conn, { incidentId: inc2.id, reason: 'test' }), 'NOT_CLOSABLE');
+  await closeIncident(dispatcher.conn, { incidentId: collecting.id, reason: 'Test text' });
+  await waitFor('agent sees close', () => getConversationContext(A, KEY5)!.activeIncident === null);
+  const closed = listIncidents(dispatcher.conn).find(i => i.id === collecting.id)!;
+  check('dispatcher closes a COLLECTING incident', closed.status === 'CLOSED' && closed.closeReason === 'Test text');
+  ctx = getConversationContext(A, KEY5)!;
+  check('close starts a new case and clears the question', ctx.caseEpoch === 2 && ctx.lastQuestion === null && ctx.pendingMessages.length === 0 && ctx.recentMessages.length === 0);
+  await waitFor('close notification', () => listPendingNotifications(A).some(n => n.conversationKey === KEY5));
+  check('close queues one simulated reply to the caller', listPendingNotifications(A).filter(n => n.conversationKey === KEY5 && n.kind === 'INFO_REPLY' && n.text.startsWith('[SIMULATION]')).length === 1);
+  await rejects('closed incident cannot be dispatched', confirmDispatchAndAssign(dispatcher.conn, { incidentId: collecting.id, confirmedServices: ['FIRE'], unitIds: ['FIRE-01'] }), 'INCIDENT_CLOSED');
+  await rejects('closed incident cannot be closed again', closeIncident(dispatcher.conn, { incidentId: collecting.id, reason: 'again' }), 'NOT_CLOSABLE');
+  await recordInbound(A, { provider: 'check', conversationKey: KEY5, route: route(KEY5), messages: [msg('c2', 'Simulation: someone fell at the demo track.')] });
+  await applyIntakePatch(A, {
+    conversationKey: KEY5, expectedRevision: 0, sourceMessageIds: ['c2'],
+    result: result('REPORT', { locationText: 'demo track' }, [{ field: 'locationText', messageId: 'c2', quote: 'demo track' }], 'Someone fell at the demo track.'),
+    recommendation: { services: [], ruleIds: [], reason: 'No demo rule matched; dispatcher review required.' },
+  });
+  const afterClose = getConversationContext(A, KEY5)!.activeIncident!;
+  check('next message after close creates a new incident without old facts', afterClose.id !== collecting.id && afterClose.caseEpoch === 2 && afterClose.facts.fireOrSmoke === null && afterClose.evidence.every(e => e.messageId === 'c2'));
+  check('READY_FOR_REVIEW incident starts ready', afterClose.status === 'READY_FOR_REVIEW');
+  await closeIncident(dispatcher.conn, { incidentId: afterClose.id, reason: 'Duplicate report' });
+  await waitFor('ready incident closed', () => listIncidents(dispatcher.conn).find(i => i.id === afterClose.id)?.status === 'CLOSED');
+  await waitFor('agent sees second close', () => getConversationContext(A, KEY5)!.caseEpoch === 3);
+  check('dispatcher closes a READY_FOR_REVIEW incident', getConversationContext(A, KEY5)!.activeIncident === null);
 
   // --- Route privacy ---
   const visible = (c: FlareConnection) =>

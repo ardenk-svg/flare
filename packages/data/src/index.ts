@@ -101,6 +101,7 @@ export function toIncident(row: IncidentRow): Incident {
     extractionState: row.extractionState as ExtractionState,
     extractionError: nul(row.extractionError),
     caseEpoch: row.caseEpoch,
+    closeReason: nul(row.closeReason),
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
   };
@@ -413,6 +414,14 @@ export function confirmDispatchAndAssign(
 
 export function resolveIncident(conn: DbConnection, input: { incidentId: string }): Promise<void> {
   return call(conn.reducers.resolveIncident({ incidentId: fromId(input.incidentId) }));
+}
+
+/**
+ * Closes a never-dispatched incident (COLLECTING or READY_FOR_REVIEW, no assignments) and starts a
+ * new intake case for the conversation. Queues a simulated INFO_REPLY to the caller.
+ */
+export function closeIncident(conn: DbConnection, input: { incidentId: string; reason: string }): Promise<void> {
+  return call(conn.reducers.closeIncident({ incidentId: fromId(input.incidentId), reason: input.reason }));
 }
 
 // ---- Responder operations ----

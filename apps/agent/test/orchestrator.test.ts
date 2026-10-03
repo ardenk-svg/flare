@@ -44,6 +44,7 @@ function incident(overrides: Partial<Incident> = {}): Incident {
     extractionState: "OK",
     extractionError: null,
     caseEpoch: 1,
+    closeReason: null,
     createdAt: "2026-10-03T12:00:00.000Z",
     updatedAt: "2026-10-03T12:00:00.000Z",
     ...overrides,

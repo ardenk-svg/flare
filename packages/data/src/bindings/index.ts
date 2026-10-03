@@ -37,6 +37,7 @@ import {
 import AckNotificationReducer from "./ack_notification_reducer";
 import AdvanceAssignmentReducer from "./advance_assignment_reducer";
 import ApplyIntakePatchReducer from "./apply_intake_patch_reducer";
+import CloseIncidentReducer from "./close_incident_reducer";
 import CompleteInboundWithoutPatchReducer from "./complete_inbound_without_patch_reducer";
 import ConfirmDispatchAndAssignReducer from "./confirm_dispatch_and_assign_reducer";
 import GrantRoleReducer from "./grant_role_reducer";
@@ -118,6 +119,7 @@ const reducersSchema = __reducers(
   __reducerSchema("ack_notification", AckNotificationReducer),
   __reducerSchema("advance_assignment", AdvanceAssignmentReducer),
   __reducerSchema("apply_intake_patch", ApplyIntakePatchReducer),
+  __reducerSchema("close_incident", CloseIncidentReducer),
   __reducerSchema("complete_inbound_without_patch", CompleteInboundWithoutPatchReducer),
   __reducerSchema("confirm_dispatch_and_assign", ConfirmDispatchAndAssignReducer),
   __reducerSchema("grant_role", GrantRoleReducer),
