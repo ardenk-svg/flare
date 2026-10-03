@@ -1,5 +1,8 @@
 import { ApiError, GoogleGenAI, type GenerateContentConfig, type ThinkingLevel } from "@google/genai";
-import type { ExtractionError } from "./contract-types.ts";
+import type { ExtractionOutcome } from "@flare/contracts";
+
+/** The contract's failure payload (not separately named in @flare/contracts). */
+export type ExtractionError = Extract<ExtractionOutcome, { ok: false }>["error"];
 
 export interface ModelRequest {
   systemInstruction: string;

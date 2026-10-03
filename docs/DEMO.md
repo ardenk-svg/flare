@@ -22,24 +22,35 @@
 | 6 | Responder accepts, then marks EN_ROUTE | The dispatcher sees the change without refreshing. The caller gets a message labelled as simulated. | "SpacetimeDB reducers own every state change." |
 | 7 | Caller: **"Any update?"** | Reply comes from committed assignment state. No new incident is created. | "Status is read from the database, not generated." |
 
-## Acceptance checklist
+## Acceptance sequence
 
-Mark each item with the date and who ran it. Use LIVE only for real iMessage, Gemini and SpacetimeDB traffic.
+This follows the required sequence in [NEXT_STEPS.md](../NEXT_STEPS.md). For each run, record who ran it, when, the exact `GEMINI_MODEL` and database, and whether each step was **LIVE** or fixture-backed. The integration pass is complete only after the whole sequence succeeds **twice without a database reset** in between.
+
+| # | Check | How | Run 1 | Run 2 |
+|---|---|---|---|---|
+| 1 | Database and the designated agent are running; dispatcher and responder use separate authorized identities | | ☐ | ☐ |
+| 2 | **Terminal path**: smoke report, location, correction → one incident, exact evidence, FIRE recommendation, live UI updates | `npm run agent:terminal` | ☐ | ☐ |
+| 3 | Confirm `FIRE-01`, accept, `EN_ROUTE` → committed notification sent and acknowledged | Both views | ☐ | ☐ |
+| 4 | Steps 2–3 again from a **real iMessage** thread; "Any update?" reflects committed assignment state | Real phone | ☐ | ☐ |
+| 5 | Stop the agent with pending or unacknowledged work, then restart → work drains safely and facts and last question survive | | ☐ | ☐ |
+| 6 | Complete and resolve case A; start case B in the **same** thread → no old facts, messages or question enter B's extraction | | ☐ | ☐ |
+| 7a | Duplicate source message creates nothing new | Replay the same provider message ID | ☐ | ☐ |
+| 7b | Stale extraction cannot overwrite a newer correction | Revision test (Persons 1 and 3) | ☐ | ☐ |
+| 7c | Two dispatchers reserve the same unit: one wins, one gets an explicit conflict | Two dispatcher clients | ☐ | ☐ |
+| 7d | Responder cannot advance another unit's assignment | | ☐ | ☐ |
+| 7e | Disconnect and reconnect clients without losing state | | ☐ | ☐ |
+| 7f | Gemini failure: incident shows `FAILED`, verified facts stay visible, and a retry recovers to `OK` | Agent with an invalid `GEMINI_MODEL` or the network blocked, then restored | ☐ | ☐ |
+| 7g | Unknown vs false: "I don't know if anyone is hurt" leaves `injuryReported` unknown | | ☐ | ☐ |
+| 7h | Trapped-person case: completing one assignment leaves the other intact | Text from `fixtures/extraction/10-trapped-multi-service.json` | ☐ | ☐ |
+| 8 | Clean installs, then all offline, module, adapter and web checks; handoffs updated with actual results | `npm ci && npm run check` | ☐ | ☐ |
+
+Person 2 evidence, checked separately before the sequence above:
 
 | Check | How | Result |
 |---|---|---|
-| Full live loop (steps 1–7) | Real phone, both views | ☐ |
-| Correction updates the existing incident, with evidence | Step 4 | ☐ |
-| Unknown vs false | Send "I don't know if anyone is hurt"; `injuryReported` stays unknown | ☐ |
-| Duplicate source message creates nothing new | Replay the same provider message ID | ☐ |
-| Gemini failure keeps verified facts and can be retried | Agent with an invalid `GEMINI_MODEL`, or the network blocked, then restored | ☐ |
-| Stale extraction cannot overwrite a newer correction | Person 1 and Person 3 revision test | ☐ |
-| Two dispatchers reserve the same unit: one wins, one conflicts | Two dispatcher clients | ☐ |
-| Trapped-person fixture: completing one assignment leaves the other intact | `fixtures/extraction/10-trapped-multi-service.json` text | ☐ |
-| Restart the agent and reload clients: incident, facts and last question survive | | ☐ |
-| Responder cannot advance another unit's assignment | | ☐ |
+| Gemini accepts the schema | `npm run smoke` in `packages/intake` | ☐ model: `________` |
+| Live eval committed, with correction and uncertainty cases reviewed by a person | `npm run eval` in `packages/intake` | ☐ report: `fixtures/results/________` |
 | No secrets or private identifiers in screenshots | Review the captures | ☐ |
-| Extraction eval report committed | `npm run eval` in `packages/intake` | ☐ report: `fixtures/results/________` |
 
 ## Known limitations to state honestly
 

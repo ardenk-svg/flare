@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { CallerFacts, CallerMessage, InboundTurn } from "../contract-types.ts";
+import type { CallerFacts, CallerMessage, InboundTurn } from "@flare/contracts";
 import { emptyFacts } from "../facts.ts";
 import type { Expectation } from "./expect.ts";
 

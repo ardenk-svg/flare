@@ -1,4 +1,4 @@
-import type { InboundTurn } from "./contract-types.ts";
+import type { InboundTurn } from "@flare/contracts";
 import { CALLER_FACT_FIELDS } from "./facts.ts";
 
 export const CHANGE_KINDS = ["TRUE", "FALSE", "UNKNOWN", "TEXT", "COUNT"] as const;

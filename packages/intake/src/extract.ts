@@ -1,4 +1,4 @@
-import type { ExtractionOutcome, InboundTurn } from "./contract-types.ts";
+import type { ExtractionOutcome, InboundTurn } from "@flare/contracts";
 import {
   ExtractionTimeoutError,
   classifyProviderError,

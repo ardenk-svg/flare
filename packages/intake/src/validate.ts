@@ -2,18 +2,18 @@
 // the model's JSON reaches the result unless it is checked here; unknown keys
 // (for example lifecycle or assignment fields) are never copied through.
 
-import type {
-  CallerFactField,
-  CallerFactPatch,
-  ExtractionResult,
-  FactEvidence,
-  InboundTurn,
-  Intent,
-} from "./contract-types.ts";
-import { FACT_KINDS, isCallerFactField, mergeFacts } from "./facts.ts";
+import {
+  INTENTS,
+  type CallerFactField,
+  type CallerFactPatch,
+  type Evidence,
+  type ExtractionResult,
+  type InboundTurn,
+  type Intent,
+} from "@flare/contracts";
+import { CALLER_FACT_KINDS, isCallerFactField, mergeFacts } from "./facts.ts";
 import { CHANGE_KINDS, type ChangeKind } from "./prompt.ts";
 
-const INTENTS: readonly Intent[] = ["REPORT", "CORRECTION", "STATUS_QUERY", "OTHER"];
 const MAX_SUMMARY = 1000;
 const MAX_QUESTION = 300;
 const MAX_TEXT_VALUE = 300;
@@ -45,8 +45,8 @@ export function locateQuote(source: string, quote: string): string | null {
 
 function decodeValue(field: CallerFactField, change: Record<string, unknown>, kind: ChangeKind): { ok: true; value: unknown } | { ok: false; why: string } {
   if (kind === "UNKNOWN") return { ok: true, value: null };
-  const factKind = FACT_KINDS[field];
-  if (factKind === "boolean") {
+  const factKind = CALLER_FACT_KINDS[field];
+  if (factKind === "bool") {
     if (kind === "TRUE") return { ok: true, value: true };
     if (kind === "FALSE") return { ok: true, value: false };
   } else if (factKind === "text" && kind === "TEXT") {
@@ -83,7 +83,7 @@ export function validateModelOutput(rawText: string | undefined, turn: InboundTu
 
   const messagesById = new Map(turn.messages.map((m) => [m.id, m]));
   const patch: CallerFactPatch = {};
-  const evidence: FactEvidence[] = [];
+  const evidence: Evidence[] = [];
   const seen = new Set<CallerFactField>();
 
   rawChanges.forEach((change, i) => {
