@@ -1,47 +1,58 @@
 # apps/web handoff (Person 4)
 
-**Status:** UI runs against either an in-memory fixture (default) or a live SpacetimeDB client (`VITE_DATA_MODE=live`, `src/data/liveClient.ts`, built on `@flare/data`). The live client has been run against a local SpacetimeDB 2.10.2 database with `npm run smoke:live` (see Checks run). The rendered pages have not been checked in a browser in live mode yet.
+**Status:** both routes run against either an in-memory fixture (default) or live SpacetimeDB (`VITE_DATA_MODE=live`). Live mode is verified against a local SpacetimeDB 2.10.2 database by `smoke:live` (40/40) and by a manual browser pass (see Checks run). UI shapes come from `@flare/contracts`, and the live client reads the shared `extractionState` directly.
 
-## Live smoke (`npm run smoke:live`)
-Drives the same `createLiveClient` the routes use, with separate dispatcher, responder (`FIRE-01`), and agent identities. It **resets the local database** and refuses any non-local `SPACETIMEDB_URI`.
+## Setup (root workspace)
+Node ≥ 22.18. From the repo root:
 
 ```sh
-spacetime start --listen-addr 127.0.0.1:3000 --in-memory     # separate terminal
-cd spacetime && npm install && npm run publish:local          # this CLI identity becomes the publisher (needed for grant_role/reset_demo)
-cd ../apps/web && npm install --no-package-lock && npm run smoke:live
+npm ci --ignore-scripts --no-audit --no-fund
+spacetime start --listen-addr 127.0.0.1:3000 --in-memory      # separate terminal
+npm run install:module && (cd spacetime && npm run publish:local)   # this CLI identity becomes publisher/ADMIN
 ```
 
-Env (optional): `SPACETIMEDB_URI` (default `ws://127.0.0.1:3000`), `FLARE_DB` (default `flare-dev`). It exits 0 when everything passes, 1 when any check fails, and 2 when it aborts on a missing CLI, an unpublished database, a non-publisher identity, a non-local URI, or a connection failure.
+`smoke:live` uses the root workspace's `tsx` and `@types/node`. `apps/web/package.json` adds no new dependencies.
 
-Coverage: role gating (no role, then a grant pushed without reconnecting), live incident push, evidence, recommendation separate from confirmation, the responder seeing only its own work, extraction FAILED with facts kept and a retry back to OK, rejected mutations (`UNAUTHORIZED`, `UNIT_SERVICE_MISMATCH`, `ALREADY_DISPATCHED`, `INVALID_TRANSITION`, `DISCONNECTED`) leaving state untouched, dispatch to OFFERED, `ACCEPTED`, then `EN_ROUTE` reaching the dispatcher by subscription, a committed EN_ROUTE notification, and reconnecting with the same token. Cross-client checks only pass when an update arrives by subscription, since the observing client never re-reads on its own.
+## Live smoke: `npm run smoke:live -w @flare/web`
+Drives the same `createLiveClient` the routes use, with separate dispatcher, responder (`FIRE-01`), and agent identities. It **resets the local database** and refuses any non-local `SPACETIMEDB_URI`.
 
-**Skipped until Person 3's contract PR lands:** extraction `PENDING`. The contract has no shared `extractionState` yet. `toExtraction()` in `liveClient.ts` already prefers that field when present and otherwise infers FAILED from `extractionError`. The smoke detects the field and turns the PENDING check on automatically. After the PR lands, delete the inference fallback.
+Env (optional): `SPACETIMEDB_URI` (default `ws://127.0.0.1:3000`), `FLARE_DB` (default `flare-dev`). It exits 0 when everything passes, 1 when any check fails, and 2 when it aborts on a missing `spacetime` CLI, an unpublished database, a non-publisher identity, a non-local URI, or a connection failure.
+
+Coverage, in order:
+1. Role gating: a fresh identity gets no-role and an empty view, a mutation from it is rejected, and a grant arrives without reconnecting.
+2. Live incident push with evidence. The recommendation is kept separate from the confirmed services, and an unassigned responder sees nothing.
+3. Extraction `PENDING`, then `FAILED`, then retry to `OK`, with the last verified facts kept throughout.
+4. Rejected mutations (`UNAUTHORIZED`, `UNIT_SERVICE_MISMATCH`, `ALREADY_DISPATCHED`, `INVALID_TRANSITION`, `DISCONNECTED`) never report success and leave state unchanged.
+5. Dispatch to `OFFERED`, `ACCEPTED`, then `EN_ROUTE`, each reaching the other role by subscription, plus a committed EN_ROUTE notification.
+6. Reconnecting with the same token restores identity, role, and assignment.
+7. `ON_SCENE`, then `COMPLETED`, which releases the unit. Only the dispatcher can resolve.
+8. A second case in the same conversation is a new incident with a later `caseEpoch` and no facts or evidence from the first.
+
+Cross-client checks pass only when an update arrives by subscription, since the observing client never re-reads on its own.
 
 ## Live mode in the browser
-1. Steps above (server + `publish:local`), then `cd apps/web && cp .env.example .env.local && npm run dev`.
-2. Open `/dispatcher` and `/responder` in **separate browser profiles**. A new identity sees "no role yet" with its identity hex. Grant it: `spacetime call --server local flare-dev grant_role <hex> DISPATCHER '{"none":[]}'` or `... RESPONDER '{"some":"FIRE-01"}'`. The page updates without reload.
-3. The token is kept in `localStorage` key `flare-live-token`. Clear it to get a new identity.
-
-Behavior: reconnects with backoff on disconnect and marks data stale meanwhile. Reducer errors are shown verbatim beside the action.
-
-## Run
-- `npm run dev` → `/dispatcher`, `/responder`, `/responder?unit=EMS-01`
-- `npm run typecheck` (app + `scripts/`), `npm run build`
-- Fixture mode: dispatcher and responder in two tabs of one browser, synced through localStorage. Identity comes from the URL (fixture only, not authorization). The "Fixture controls" panel simulates disconnect, a caller correction, extraction pending/failed, a rigged unit conflict, and reset.
+1. Setup above, then `cd apps/web && cp .env.example .env.local && npm run dev`.
+2. Open `/dispatcher` and `/responder` in **separate browser profiles**, since the token lives in `localStorage` key `flare-live-token`. A new identity shows "no role yet" with its hex. Grant it: `spacetime call --server local flare-dev grant_role <hex> DISPATCHER '{"none":[]}'` or `... RESPONDER '{"some":"FIRE-01"}'`. The page updates without reload.
 
 ## Interfaces
-- `src/types.ts`: `FlareClient`, `Snapshot`, `OpResult`. The incident/unit/assignment shapes are still a **temporary mirror** of `docs/CONTRACT.md`.
-- `src/data/liveClient.ts`: `createLiveClient({ uri, database, tokenStore? })` returns a `LiveClient` (`FlareClient` + `close()`). `tokenStore` defaults to localStorage. The smoke passes in-memory stores so each identity is separate.
-- `src/data/fixtureClient.ts`: encodes the contract rules for offline demos.
+- `src/types.ts` re-exports `Service`, `IncidentStatus`, `AssignmentStatus`, `CallerFacts`, `Evidence`, `Unit`, `Assignment`, `ExtractionState`, and `ASSIGNMENT_ORDER` from `@flare/contracts`. `IncidentView`, `Snapshot`, `FlareClient`, and `OpResult` are UI-level.
+- `src/data/liveClient.ts`: `createLiveClient({ uri, database, tokenStore? })` returns a `LiveClient` (`FlareClient` + `close()`). `toExtraction()` maps the contract's `extractionState`/`extractionError`.
+- `src/data/fixtureClient.ts`: encodes the contract rules for offline demos. Fixture assignments now carry `service` and `createdAt`.
 
-## Checks run (2026-10-03, local in-memory SpacetimeDB 2.10.2, Node 26.7)
-- `npm run smoke:live`: 29 passed, 1 skipped (PENDING). Three consecutive runs, same result.
-- Failure modes: unknown `FLARE_DB`, non-local URI, and `spacetime` missing from PATH each abort with a specific message.
-- `npm run typecheck`, `npm run build`: pass.
-- `packages/data` `npm run check` (Person 3's adapter checks) passes on this machine.
+## Checks run (2026-10-03, local in-memory SpacetimeDB 2.10.2, Node 26.7, main @ 7676d47 + this branch)
+- `npm ci --ignore-scripts --no-audit --no-fund` from root: OK, lockfile unchanged.
+- `npm run smoke:live -w @flare/web`: 40/40 on 3 consecutive runs without republishing.
+- Bad config: unknown `FLARE_DB`, non-local URI, and `spacetime` missing from PATH each abort with a specific message.
+- `npm run typecheck -w @flare/web` (app + `scripts/`), `npm run build -w @flare/web`: pass.
+- `npm run check:data:live` (Person 3's 64 adapter checks): pass.
+- Manual browser pass (Chrome, live mode, dev server):
+  - Dispatcher goes from no-role to granted without a reload, and the incident appears live.
+  - Banner reads "Extraction pending" (blue), then "Extraction failed: TIMEOUT…" (red), and the banner disappears on success. Facts and evidence stayed visible the whole time.
+  - Confirming FIRE-01 from the UI moves the incident to DISPATCHED. Responder Accept and En Route clicks move the assignment to EN_ROUTE, and the dispatcher shows EN_ROUTE.
 
 ## Unresolved / needs others
-- Person 3: shared `OK | PENDING | FAILED` extraction state, then remove the `extractionError` inference and confirm the PENDING smoke check passes.
-- Person 1: this PR adds `tsx` and `@types/node` devDependencies to `apps/web/package.json`. The root lockfile was not touched and needs reconciling.
-- No visual browser check of live mode yet. Reconnect is covered by closing a session and reopening it with the same token. Dropping the server mid-session hasn't been tested.
+- **Root `npm run check` fails on main in `apps/agent`, not the web app.** Person 1's merged orchestrator predates Person 3's contract change: `data-port.ts` omits `route` in `recordInbound`, and the agent test fixtures lack `route`, `extractionState`, and `caseEpoch`. Person 1 needs to rebase.
+- The browser pass used one profile with tokens swapped between roles. Simultaneous two-profile updates are covered by the smoke, not by eye.
+- Reconnect was tested by closing a client and reconnecting with the same token. Losing the server mid-session hasn't been tested, because an `--in-memory` restart wipes data. Test it on a persistent database.
+- Not yet run against the shared Maincloud database. Person 3 hasn't announced it yet.
 - Responder evidence stays hidden in the UI. Confirm which projection fields responders may see.

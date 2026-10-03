@@ -14,15 +14,14 @@ const URI = process.env.SPACETIMEDB_URI ?? "ws://127.0.0.1:3000";
 const DB = process.env.FLARE_DB ?? "flare-dev";
 const SERVER = "local";
 const KEY = "smoke:conversation-1";
+const ROUTE = { platform: "smoke", spaceId: "smoke-space-1", line: null };
 
 // ---- Reporting ----
 let failures = 0;
-let skips = 0;
 const check = (name: string, ok: boolean, detail = "") => {
   if (!ok) failures++;
   console.log(`${ok ? "PASS" : "FAIL"}  ${name}${!ok && detail ? `  -- ${detail}` : ""}`);
 };
-const skip = (name: string, why: string) => { skips++; console.log(`SKIP  ${name}  -- ${why}`); };
 const fatal = (msg: string): never => { console.error(`\nSMOKE ABORTED: ${msg}`); process.exit(2); };
 
 // ---- Preflight: refuse anything but a local, published, reachable database ----
@@ -110,7 +109,7 @@ async function main() {
   const A = agent.conn;
 
   const pushesBefore = dispatcher.pushes;
-  await recordInbound(A, { provider: "smoke", conversationKey: KEY, messages: [msg("m1", "Simulation: I see smoke outside.")] });
+  await recordInbound(A, { provider: "smoke", conversationKey: KEY, route: ROUTE, messages: [msg("m1", "Simulation: I see smoke outside.")] });
   await applyIntakePatch(A, {
     conversationKey: KEY, expectedRevision: 0, sourceMessageIds: ["m1"], recommendation: FIRE_REC,
     result: extraction("REPORT", { fireOrSmoke: true }, [{ field: "fireOrSmoke", messageId: "m1", quote: "I see smoke outside" }], "Caller reports smoke outside; location unknown."),
@@ -122,11 +121,9 @@ async function main() {
   check("evidence quote reaches dispatcher", inc().evidence.some((e) => e.field === "fireOrSmoke" && e.quote === "I see smoke outside"));
   check("unassigned responder sees no incident", r().incidents.length === 0);
 
-  // ---- 3. Extraction pending / failed keep the last verified facts ----
-  await recordInbound(A, { provider: "smoke", conversationKey: KEY, messages: [msg("m2", "North entrance of the demo student center.")] });
-  const sharedState = "extractionState" in (listIncidents(A).find((i) => i.id === incidentId) ?? {});
-  if (sharedState) await observe("inbound for active incident shows PENDING with facts kept", () => inc().extraction.state === "PENDING" && inc().facts.fireOrSmoke === true);
-  else skip("extraction PENDING display", "contract has no shared extractionState yet (Person 3); UI can only show FAILED");
+  // ---- 3. Extraction pending / failed keep the last verified facts; only the indicator changes ----
+  await recordInbound(A, { provider: "smoke", conversationKey: KEY, route: ROUTE, messages: [msg("m2", "North entrance of the demo student center.")] });
+  await observe("inbound for active incident shows PENDING with facts kept", () => inc().extraction.state === "PENDING" && inc().facts.fireOrSmoke === true);
 
   await recordExtractionFailure(A, { conversationKey: KEY, messageIds: ["m2"], error: { code: "TIMEOUT", message: "Gemini timed out", retryable: true } });
   await observe("extraction failure shows FAILED with a message", () => inc().extraction.state === "FAILED" && !!inc().extraction.message?.includes("TIMEOUT"));
@@ -170,6 +167,27 @@ async function main() {
   await observe("reconnect keeps identity, role, and committed assignment", () =>
     again.snap().identityHex === responderHex && again.snap().identity.unitId === "FIRE-01" && again.snap().assignments.some((a) => a.id === assignmentId && a.status === "EN_ROUTE"));
 
+  // ---- 8. Resolve, then a second case in the same conversation starts clean ----
+  const R = again.client;
+  check("responder reaches ON_SCENE and COMPLETED", (await R.advanceAssignment({ assignmentId, next: "ON_SCENE" })).ok && (await R.advanceAssignment({ assignmentId, next: "COMPLETED" })).ok);
+  await observe("dispatcher sees COMPLETED and FIRE-01 released", () => dAssign() === "COMPLETED" && d().units.find((u) => u.id === "FIRE-01")?.status === "AVAILABLE");
+  check("completing the assignment does not resolve the incident", inc().status === "DISPATCHED");
+  rejected("responder cannot resolve", await R.resolveIncident({ incidentId }), "UNAUTHORIZED");
+  const resolved = await dispatcher.client.resolveIncident({ incidentId });
+  check("dispatcher resolves the incident", resolved.ok, resolved.ok ? "" : `${resolved.code}: ${resolved.message}`);
+  await observe("RESOLVED pushed to dispatcher", () => inc().status === "RESOLVED");
+
+  await recordInbound(A, { provider: "smoke", conversationKey: KEY, route: ROUTE, messages: [msg("b1", "Simulation: a car crashed into a pole on Demo Street.")] });
+  await applyIntakePatch(A, {
+    conversationKey: KEY, expectedRevision: 0, sourceMessageIds: ["b1"], recommendation: { services: [], ruleIds: [], reason: "No demo rule matched; dispatcher review required." },
+    result: extraction("REPORT", { incidentType: "vehicle collision" }, [{ field: "incidentType", messageId: "b1", quote: "a car crashed into a pole" }], "Caller reports a car crashed into a pole on Demo Street."),
+  });
+  await observe("second case appears as a new incident", () => d().incidents.some((i) => i.id !== incidentId));
+  const caseB = d().incidents.find((i) => i.id !== incidentId)!;
+  check("second case carries no facts or evidence from the first", caseB.facts.fireOrSmoke === null && caseB.facts.locationText === null && caseB.evidence.every((e) => e.messageId === "b1"));
+  check("second case is a later intake case", (listIncidents(A).find((i) => i.id === caseB.id)?.caseEpoch ?? 0) > (listIncidents(A).find((i) => i.id === incidentId)?.caseEpoch ?? 0));
+  check("first incident stays RESOLVED in history", inc().status === "RESOLVED");
+
   dispatcher.client.close();
   again.client.close();
   A.disconnect();
@@ -178,6 +196,6 @@ async function main() {
 main()
   .catch((e) => { failures++; console.error("FAIL  unexpected error:", e); })
   .finally(() => {
-    console.log(`\n${failures === 0 ? "Smoke passed" : `Smoke FAILED (${failures} failing)`}${skips ? `, ${skips} skipped` : ""}.`);
+    console.log(`\n${failures === 0 ? "Smoke passed" : `Smoke FAILED (${failures} failing)`}.`);
     process.exit(failures === 0 ? 0 : 1);
   });

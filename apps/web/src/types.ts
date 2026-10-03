@@ -1,41 +1,10 @@
-// TEMPORARY local mirror of docs/CONTRACT.md view shapes.
-// Replace with packages/contracts + packages/data projections from Person 3.
-export type Service = "POLICE" | "FIRE" | "EMS";
-export type IncidentStatus = "COLLECTING" | "READY_FOR_REVIEW" | "DISPATCHED" | "RESOLVED";
-export type AssignmentStatus = "OFFERED" | "ACCEPTED" | "EN_ROUTE" | "ON_SCENE" | "COMPLETED";
-
-export interface CallerFacts {
-  incidentType: string | null;
-  locationText: string | null;
-  peopleInvolved: number | null;
-  callerReportedConscious: boolean | null;
-  callerReportedBreathing: boolean | null;
-  fireOrSmoke: boolean | null;
-  trappedPerson: boolean | null;
-  violentThreat: boolean | null;
-  injuryReported: boolean | null;
-}
-export type CallerFactField = keyof CallerFacts;
-
-export interface Evidence {
-  field: CallerFactField;
-  messageId: string;
-  quote: string;
-}
-
-export interface Unit {
-  id: string;
-  service: Service;
-  status: "AVAILABLE" | "BUSY";
-}
-
-export interface Assignment {
-  id: string;
-  incidentId: string;
-  unitId: string;
-  status: AssignmentStatus;
-  updatedAt: string;
-}
+// Shared shapes come from @flare/contracts. IncidentView is the UI projection of a contract Incident.
+import type { CallerFactField, CallerFacts, Evidence, ExtractionState, IncidentStatus, Service } from "@flare/contracts";
+export type {
+  Assignment, AssignmentStatus, CallerFactField, CallerFacts, Evidence, ExtractionState, IncidentStatus, Service, Unit,
+} from "@flare/contracts";
+export { ASSIGNMENT_ORDER } from "@flare/contracts";
+import type { Assignment, AssignmentStatus, Unit } from "@flare/contracts";
 
 export interface IncidentView {
   id: string;
@@ -49,7 +18,7 @@ export interface IncidentView {
   ruleIds: string[];
   confirmedServices: Service[];
   needsReview: boolean;
-  extraction: { state: "OK" | "PENDING" | "FAILED"; message?: string };
+  extraction: { state: ExtractionState; message?: string };
   createdAt: string;
   updatedAt: string;
 }
@@ -87,4 +56,3 @@ export interface FlareClient {
   resolveIncident(req: { incidentId: string }): Promise<OpResult>;
 }
 
-export const ASSIGNMENT_ORDER: AssignmentStatus[] = ["OFFERED", "ACCEPTED", "EN_ROUTE", "ON_SCENE", "COMPLETED"];

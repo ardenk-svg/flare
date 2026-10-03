@@ -107,8 +107,8 @@ export function createFixtureClient(identity: Identity): FixtureClient {
       shared.units = shared.units.map((u) => (unitIds.includes(u.id) ? { ...u, status: "BUSY" as const } : u));
       shared.assignments = [
         ...shared.assignments,
-        ...unitIds.map((unitId): Assignment => ({
-          id: `ASG-${incidentId}-${unitId}`, incidentId, unitId, status: "OFFERED", updatedAt: ts,
+        ...units.map((u): Assignment => ({
+          id: `ASG-${incidentId}-${u.id}`, incidentId, unitId: u.id, service: u.service, status: "OFFERED", createdAt: ts, updatedAt: ts,
         })),
       ];
       shared.incidents = shared.incidents.map((i) =>

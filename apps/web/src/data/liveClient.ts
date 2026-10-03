@@ -21,13 +21,10 @@ const localTokenStore: TokenStore = {
   set: (t) => { try { localStorage.setItem(TOKEN_KEY, t); } catch { /* ignore */ } },
 };
 
-type ExtractionState = IncidentView["extraction"]["state"];
-
-// Prefer the shared extraction state once the contract exposes it; until then only FAILED is observable.
 export function toExtraction(i: Incident): IncidentView["extraction"] {
-  const shared = (i as Incident & { extractionState?: ExtractionState }).extractionState;
-  const state: ExtractionState = shared ?? (i.extractionError ? "FAILED" : "OK");
-  return state === "FAILED" ? { state, message: i.extractionError ?? undefined } : { state };
+  return i.extractionState === "FAILED"
+    ? { state: "FAILED", message: i.extractionError ?? undefined }
+    : { state: i.extractionState };
 }
 
 function toView(i: Incident): IncidentView {
