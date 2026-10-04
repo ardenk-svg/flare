@@ -136,6 +136,14 @@ Verification: root check passed 99 tests plus typechecks/build; 143 live adapter
 - Location card (shared by both views): map when the caller shared coordinates, labelled with its source and "unverified"; typed text otherwise, labelled "Caller typed location · unverified" with no map. Coordinates are never invented.
 - Checks: `npm run typecheck -w @flare/web`, `npm test -w @flare/web` (9/9), `npm run build -w @flare/web` pass. **Not done:** visual browser pass (extension unavailable); check 1440px and phone width by eye.
 
+## Intake priority correction (2026-10-04)
+
+Unclassified reports and pending/failed extraction now show **Needs assessment** instead of falling back to Low. Existing explicit High/Critical facts retain their priority during extraction. Queue order is Critical, High, Needs assessment, Medium, then oldest first within each group.
+
+An explicit first-person statement such as "Help im dying" or "I'm going to die" raises the display priority to High and shows a distress review notice in both operator views. The detector uses caller messages in the current case, their English translations, and callerStatus; operator/agent text and summaries do not trigger it. A later location answer does not hide an earlier distress report. This is a narrow attention cue for operator review, not a general medical classifier. Breathing/injury facts stay unknown until supported, and service recommendations/assignments continue through the existing rules and human confirmation.
+
+Verified `npm run check`: 104 tests (14 web tests), all workspace/script typechecks, and production build passed. A synthetic browser preview verified High plus the distress notice for "Help im dying", Needs assessment for an unclassified report, queue ordering, and the assigned responder's High badge/notice; no browser console errors. Screenshot: ignored `.flare/screenshots/intake-priority.jpg`. No phone worker or database was used by the UI preview; no schema migration is needed.
+
 ## Light/dark theme toggle (2026-10-04)
 
 - A sun/moon button at the right of the top bar switches themes. With no saved choice, the page follows the OS setting and tracks OS changes live. A click saves `light` or `dark` in `localStorage` key `flare-theme` (try/catch; falls back to this page load only).

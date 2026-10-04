@@ -63,8 +63,19 @@ export function getRelevantMissingFacts(i: IncidentView): FactRow[] {
 }
 
 // ---- Severity (display only; replace with a backend value when one exists) ----
-export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
-export const SEVERITY_RANK: Record<Severity, number> = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+export type Severity = "CRITICAL" | "HIGH" | "UNASSESSED" | "MEDIUM";
+export const SEVERITY_RANK: Record<Severity, number> = { CRITICAL: 0, HIGH: 1, UNASSESSED: 2, MEDIUM: 3 };
+
+// A narrow attention flag for explicit first-person distress, not an inferred medical fact.
+// The English translation covers non-English callers without changing their original evidence.
+const DISTRESS_STATEMENT = /\bi(?:['’]m|m|\s+am)\s+(?:(?:really|literally|actually)\s+)?(?:dying|(?:going|about)\s+to\s+die)\b/i;
+
+export function hasReportedDistress(i: IncidentView): boolean {
+  if (i.facts.callerStatus?.trim().toLowerCase() === "dying" || DISTRESS_STATEMENT.test(i.facts.callerStatus ?? "")) return true;
+  return (i.conversation ?? []).some(m => m.sender === "CALLER" && (
+    DISTRESS_STATEMENT.test(m.text) || DISTRESS_STATEMENT.test(m.translatedText ?? "")
+  ));
+}
 
 export function deriveSeverity(i: IncidentView): Severity {
   const f = factsOf(i);
@@ -72,8 +83,10 @@ export function deriveSeverity(i: IncidentView): Severity {
   if (f.trappedPerson === true && f.fireOrSmoke === true) return "CRITICAL";
   if (f.violentThreat === true && f.weaponPresent === true) return "CRITICAL";
   if (f.violentThreat || f.fireOrSmoke || f.trappedPerson || f.injuryReported || f.weaponPresent) return "HIGH";
-  if (known(f.incidentType) || i.recommendedServices.length > 0) return "MEDIUM";
-  return "LOW";
+  if (hasReportedDistress(i)) return "HIGH";
+  if (i.extraction.state !== "OK") return "UNASSESSED";
+  if ((typeof f.incidentType === "string" && f.incidentType.trim()) || i.recommendedServices.length > 0) return "MEDIUM";
+  return "UNASSESSED";
 }
 
 /** Highest severity first, then oldest first so nothing waits behind newer reports of the same severity. */

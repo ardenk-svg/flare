@@ -5,7 +5,7 @@ import {
   Pending, RelativeTime, StaleBanner, useAction,
 } from "../components";
 import { ASSIGNMENT_ORDER, type AssignmentStatus, type CallerFacts, type IncidentView } from "../types";
-import { ActivityFeed, CallerConversation, IncidentLocation, ServiceTag, SeverityBadge } from "../console";
+import { ActivityFeed, CallerConversation, CallerDistressNotice, IncidentLocation, ServiceTag, SeverityBadge } from "../console";
 import { deriveSeverity, formatFact, getKnownFacts, getRelevantMissingFacts, incidentTitle } from "../incident";
 
 const NEXT_ACTION: Partial<Record<AssignmentStatus, string>> = {
@@ -125,6 +125,7 @@ export default function Responder() {
           </div>
         </section>
 
+        <CallerDistressNotice incident={incident} />
         {incident.needsReview && (
           <div className="notice err" role="status">
             <Icon name="alert" /><span>The caller changed facts after dispatch. The dispatcher is reviewing them.</span>
