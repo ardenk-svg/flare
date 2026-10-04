@@ -492,7 +492,7 @@ export function ActivityFeed({ incident, assignments }: { incident: IncidentView
         {events.map((e) => (
           <li key={e.id} className={`${MAJOR_EVENTS.has(e.kind) ? "major" : ""} ${now - new Date(e.at).getTime() < 8000 ? "fresh" : ""}`}>
             <time dateTime={e.at} className="mono">{clock(e.at)}</time>
-            <span>{activityLabel(e)}{e.detail && <span className="muted"> · {e.detail}</span>}</span>
+            <span>{activityLabel(e)}</span>
           </li>
         ))}
       </ol>

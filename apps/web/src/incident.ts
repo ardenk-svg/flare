@@ -18,7 +18,6 @@ export const FACT_LABELS: Record<string, string> = {
   trappedPerson: "Anyone trapped",
   violentThreat: "Violent threat",
   injuryReported: "Injuries",
-  // Planned in #28; shown as still needed until the backend captures them.
   weaponPresent: "Weapon present",
   suspectCount: "Number of suspects",
   callerStatus: "Caller status",
@@ -156,7 +155,9 @@ const UNIT_EVENT: Record<AssignmentStatus, ActivityKind> = {
  * creation, shared location, caller messages, each assignment's creation and current status, and a terminal status.
  */
 export function getActivity(i: IncidentView, assignments: Assignment[]): { events: ActivityEvent[]; derived: boolean } {
-  if (i.events?.length) return { events: [...i.events].sort((a, b) => b.at.localeCompare(a.at)), derived: false };
+  // Backend ids are increasing integers; they break ties between events committed in the same transaction.
+  const byId = (a: string, b: string) => a.length - b.length || a.localeCompare(b);
+  if (i.events?.length) return { events: [...i.events].sort((a, b) => b.at.localeCompare(a.at) || byId(b.id, a.id)), derived: false };
   const ev: ActivityEvent[] = [{ id: "created", kind: "INCIDENT_CREATED", at: i.createdAt }];
   for (const [n, m] of (i.conversation ?? []).entries())
     if (m.sender === "CALLER") ev.push({ id: `msg-${n}`, kind: "CALLER_MESSAGE", at: m.at });
@@ -171,18 +172,26 @@ export function getActivity(i: IncidentView, assignments: Assignment[]): { event
     if (a.status !== "OFFERED") ev.push({ id: `asg-${a.id}-${a.status}`, kind: UNIT_EVENT[a.status], at: a.updatedAt, unitId: a.unitId });
   }
   if (i.status === "RESOLVED") ev.push({ id: "resolved", kind: "INCIDENT_RESOLVED", at: i.updatedAt });
-  if (i.status === "CLOSED") ev.push({ id: "closed", kind: "INCIDENT_CLOSED", at: i.updatedAt, detail: i.closeReason ?? undefined });
+  if (i.status === "CLOSED") ev.push({ id: "closed", kind: "INCIDENT_CLOSED", at: i.updatedAt, ...(i.closeReason ? { detail: i.closeReason } : {}) });
   // Stable for equal timestamps: later-pushed (later in the lifecycle) sorts first.
   return { events: ev.map((e, n) => [e, n] as const).sort(([a, x], [b, y]) => b.at.localeCompare(a.at) || y - x).map(([e]) => e), derived: true };
 }
 
+const LOCATION_SOURCE: Record<string, string> = { TYPED: "typed by caller", IMESSAGE_PIN: "shared iMessage pin", FIND_MY: "shared via Find My" };
+const NOTIFIED: Record<string, string> = {
+  DISPATCH_CONFIRMED: "Caller told help is being sent",
+  ASSIGNMENT_EN_ROUTE: "Caller told a unit is en route",
+  INFO_REPLY: "Status reply sent to caller",
+};
+
+/** Readable line for an event. Internal codes in `detail` are translated or dropped, never shown raw. */
 export function activityLabel(e: ActivityEvent): string {
   const unit = e.unitId ?? "Unit";
   switch (e.kind) {
     case "INCIDENT_CREATED": return "Incident created";
     case "CALLER_MESSAGE": return "Caller message received";
     case "FACTS_UPDATED": return e.fields?.length ? `Updated: ${e.fields.map((f) => FACT_LABELS[f] ?? f).join(", ")}` : "Facts updated";
-    case "LOCATION_RECEIVED": return "Location received";
+    case "LOCATION_RECEIVED": return e.detail && LOCATION_SOURCE[e.detail] ? `Location received (${LOCATION_SOURCE[e.detail]})` : "Location received";
     case "SERVICES_RECOMMENDED": return e.services?.length ? `${e.services.map((s) => SERVICE_LABEL[s]).join(" + ")} recommended` : "Recommendation cleared";
     case "EXTRACTION_FAILED": return "Couldn't read a caller message";
     case "DISPATCH_CONFIRMED": return e.services?.length ? `Dispatch confirmed: ${e.services.map((s) => SERVICE_LABEL[s]).join(" + ")}` : "Dispatch confirmed";
@@ -191,15 +200,16 @@ export function activityLabel(e: ActivityEvent): string {
     case "UNIT_EN_ROUTE": return `${unit} en route`;
     case "UNIT_ON_SCENE": return `${unit} on scene`;
     case "UNIT_COMPLETED": return `${unit} completed`;
-    case "CALLER_NOTIFIED": return "Update sent to caller";
+    case "CALLER_NOTIFIED": return (e.detail && NOTIFIED[e.detail]) ?? "Update sent to caller";
     case "INCIDENT_RESOLVED": return "Incident resolved";
-    case "INCIDENT_CLOSED": return "Closed without dispatch";
+    case "INCIDENT_CLOSED": return e.detail ? `Closed without dispatch: ${e.detail}` : "Closed without dispatch";
   }
 }
 
 /** Major transitions get emphasis in the feed. */
 export const MAJOR_EVENTS: ReadonlySet<ActivityKind> = new Set([
-  "INCIDENT_CREATED", "DISPATCH_CONFIRMED", "UNIT_ON_SCENE", "INCIDENT_RESOLVED", "INCIDENT_CLOSED",
+  "INCIDENT_CREATED", "LOCATION_RECEIVED", "SERVICES_RECOMMENDED", "DISPATCH_CONFIRMED", "UNIT_ACCEPTED", "UNIT_EN_ROUTE",
+  "UNIT_ON_SCENE", "UNIT_COMPLETED", "INCIDENT_RESOLVED", "INCIDENT_CLOSED",
 ]);
 
 // ---- Time ----

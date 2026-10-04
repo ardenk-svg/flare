@@ -2,10 +2,12 @@
 // The browser holds only its own identity token; roles are granted by the operator on the backend.
 import {
   advanceAssignment, closeIncident, confirmDispatchAndAssign, connectFlare, FlareOpError, getMyRole,
-  listAssignments, listIncidents, listUnits, resolveIncident, type FlareConnection,
+  listAssignments, listConversation, listIncidentEvents, listIncidents, listUnits, resolveIncident, type FlareConnection,
 } from "@flare/data";
 import type { Incident } from "@flare/contracts";
-import type { Assignment, FlareClient, Identity, IncidentView, OpResult, Snapshot } from "../types";
+import type {
+  ActivityEvent, Assignment, ConversationMessage, FlareClient, Identity, IncidentView, OpResult, Snapshot,
+} from "../types";
 
 export interface TokenStore { get(): string | undefined; set(token: string): void }
 export interface LiveConfig {
@@ -39,14 +41,26 @@ export function toExtraction(i: Incident): IncidentView["extraction"] {
     : { state: i.extractionState };
 }
 
-function toView(i: Incident): IncidentView {
+/** Incident projection plus the dispatcher-only transcript and activity log (empty views for responders). */
+function toView(i: Incident, conn: FlareConnection["conn"]): IncidentView {
+  const conversation: ConversationMessage[] = listConversation(conn, i.id)
+    .map(({ sender, text, at, delivery }) => (delivery ? { sender, text, at, delivery } : { sender, text, at }));
+  const events: ActivityEvent[] = listIncidentEvents(conn, i.id).map((e) => ({
+    id: e.id, kind: e.kind, at: e.at,
+    ...(e.unitId ? { unitId: e.unitId } : {}),
+    ...(e.services.length ? { services: e.services } : {}),
+    ...(e.fields.length ? { fields: e.fields } : {}),
+    ...(e.detail ? { detail: e.detail } : {}),
+  }));
   return {
     id: i.id, status: i.status, summary: i.summary, facts: i.facts,
     evidence: i.evidence.map(({ field, messageId, quote }) => ({ field, messageId, quote })),
     corrections: i.lastCorrections,
     recommendedServices: i.recommendedServices, recommendationReason: i.recommendationReason,
     ruleIds: i.recommendationRuleIds, confirmedServices: i.confirmedServices,
-    needsReview: i.needsReview, closeReason: i.closeReason,
+    needsReview: i.needsReview, closeReason: i.closeReason, sharedLocation: i.sharedLocation,
+    ...(conversation.length ? { conversation } : {}),
+    ...(events.length ? { events } : {}),
     extraction: toExtraction(i),
     createdAt: i.createdAt, updatedAt: i.updatedAt,
   };
@@ -82,7 +96,7 @@ export function createLiveClient(cfg: LiveConfig): LiveClient {
     const assignments: Assignment[] = listAssignments(live.conn);
     set({
       access, identity, identityHex: live.identityHex,
-      incidents: listIncidents(live.conn).map(toView),
+      incidents: listIncidents(live.conn).map((i) => toView(i, live!.conn)),
       units: listUnits(live.conn), assignments,
     });
   };
@@ -98,7 +112,7 @@ export function createLiveClient(cfg: LiveConfig): LiveClient {
       if (closed) { c.conn.disconnect(); return; }
       attempt = 0; live = c; tokens.set(c.token);
       const db = c.conn.db;
-      for (const t of [db.incidentView, db.assignmentView, db.unitView, db.myRole]) {
+      for (const t of [db.incidentView, db.assignmentView, db.unitView, db.myRole, db.incidentConversationView, db.incidentEventView]) {
         t.onInsert(refresh); t.onUpdate(refresh); t.onDelete(refresh);
       }
       set({ connection: "connected", connectError: undefined });

@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import type { CallerFactPatch, Evidence, ExtractionResult, Intent, Recommendation } from "@flare/contracts";
 import {
   applyIntakePatch, connectFlare, getMyRole, listIncidents, listPendingNotifications,
-  recordExtractionFailure, recordInbound, type FlareConnection,
+  recordExtractionFailure, recordInbound, recordSentQuestion, recordSharedLocation, type FlareConnection,
 } from "@flare/data";
 import { createLiveClient, type LiveClient, type TokenStore } from "../src/data/liveClient";
 import { deriveSeverity, getActivity, getRelevantMissingFacts, recommendationReasons } from "../src/incident";
@@ -124,6 +124,13 @@ async function main() {
     getRelevantMissingFacts(inc())[0]?.key === "locationText");
   check("evidence quote reaches dispatcher", inc().evidence.some((e) => e.field === "fireOrSmoke" && e.quote === "I see smoke outside"));
   check("unassigned responder sees no incident", r().incidents.length === 0);
+  check("dispatcher transcript has the caller's message", inc().conversation?.some((m) => m.sender === "CALLER" && m.text === "Simulation: I see smoke outside.") === true);
+  check("dispatcher activity comes from backend events", getActivity(inc(), d().assignments).derived === false &&
+    inc().events!.some((e) => e.kind === "INCIDENT_CREATED") && inc().events!.some((e) => e.kind === "SERVICES_RECOMMENDED"));
+  await recordSentQuestion(A, { conversationKey: KEY, question: "[SIMULATION] Where are you?", delivered: true });
+  await observe("agent question reaches the transcript by subscription", () =>
+    inc().conversation?.some((m) => m.sender === "AGENT" && m.text === "[SIMULATION] Where are you?" && m.delivery === "SENT") === true);
+  check("transcript and incident carry no route or conversation key", !JSON.stringify(inc()).includes("smoke-space-1") && !JSON.stringify(inc()).includes(KEY));
 
   // ---- 3. Extraction pending / failed keep the last verified facts; only the indicator changes ----
   await recordInbound(A, { provider: "smoke", conversationKey: KEY, route: ROUTE, messages: [msg("m2", "North entrance of the demo student center.")] });
@@ -137,6 +144,8 @@ async function main() {
     conversationKey: KEY, expectedRevision: 1, sourceMessageIds: ["m2"], recommendation: FIRE_REC,
     result: extraction("REPORT", { locationText: "North entrance of the demo student center" }, [{ field: "locationText", messageId: "m2", quote: "North entrance of the demo student center" }], "Smoke outside the north entrance of the demo student center."),
   });
+  await observe("LOCATION_RECEIVED event once the location is typed", () =>
+    inc().events?.some((e) => e.kind === "LOCATION_RECEIVED" && e.detail === "TYPED") === true);
   await observe("successful retry returns to OK and READY_FOR_REVIEW", () => inc().extraction.state === "OK" && inc().status === "READY_FOR_REVIEW" && inc().facts.locationText !== null);
 
   // ---- 4. Rejected mutations never report success ----
@@ -159,8 +168,11 @@ async function main() {
   await observe("dispatcher sees ACCEPTED without refresh", () => dAssign() === "ACCEPTED");
   check("responder advances to EN_ROUTE", (await responder.client.advanceAssignment({ assignmentId, next: "EN_ROUTE" })).ok);
   await observe("dispatcher sees EN_ROUTE without refresh", () => dAssign() === "EN_ROUTE");
-  await observe("live activity shows FIRE-01 en route from pushed state", () =>
-    getActivity(inc(), d().assignments).events[0]?.kind === "UNIT_EN_ROUTE");
+  await observe("live activity shows FIRE-01 accepted then en route from backend events", () => {
+    const kinds = getActivity(inc(), d().assignments).events.map((e) => e.kind);
+    return kinds[0] === "UNIT_EN_ROUTE" && kinds.includes("UNIT_ACCEPTED") && kinds.includes("DISPATCH_CONFIRMED");
+  });
+  check("assigned responder sees the incident but no transcript or activity log", r().incidents.length === 1 && !r().incidents[0].conversation && !r().incidents[0].events);
   await observe("EN_ROUTE notification committed for the agent", () => listPendingNotifications(A).some((n) => n.kind === "ASSIGNMENT_EN_ROUTE" && n.conversationKey === KEY));
 
   // ---- 7. Disconnect blocks mutations; reconnect with the same token restores identity and state ----
@@ -194,7 +206,17 @@ async function main() {
   check("second case is a later intake case", (listIncidents(A).find((i) => i.id === caseB.id)?.caseEpoch ?? 0) > (listIncidents(A).find((i) => i.id === incidentId)?.caseEpoch ?? 0));
   check("first incident stays RESOLVED in history", inc().status === "RESOLVED");
 
-  // ---- 9. Close without dispatch ----
+  // ---- 9. Shared location reaches the dispatcher ----
+  await recordSharedLocation(A, {
+    provider: "smoke", conversationKey: KEY, route: ROUTE, messageId: "pin-1", receivedAt: new Date().toISOString(),
+    latitude: 42.29107, longitude: -83.71623, accuracyMeters: 20, label: "Demo Street", source: "IMESSAGE_PIN",
+  });
+  const caseBView = () => d().incidents.find((i) => i.id === caseB.id);
+  await observe("shared location pushed to dispatcher", () => caseBView()?.sharedLocation?.latitude === 42.29107 && caseBView()?.sharedLocation?.source === "IMESSAGE_PIN");
+  check("shared location satisfies the location gate", caseBView()?.status === "READY_FOR_REVIEW");
+  check("location card no longer asks for a location", !getRelevantMissingFacts(caseBView()!).some((m) => m.key === "locationText"));
+
+  // ---- 10. Close without dispatch ----
   rejected("responder cannot close", await R.closeIncident({ incidentId: caseB.id, reason: "Test or accidental text" }), "UNAUTHORIZED");
   rejected("close needs a reason", await dispatcher.client.closeIncident({ incidentId: caseB.id, reason: " " }), "REASON_REQUIRED");
   const closed = await dispatcher.client.closeIncident({ incidentId: caseB.id, reason: "Test or accidental text" });
