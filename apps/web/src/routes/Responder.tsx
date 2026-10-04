@@ -46,6 +46,7 @@ export default function Responder() {
   const next = ASSIGNMENT_ORDER[ASSIGNMENT_ORDER.indexOf(assignment.status) + 1] as AssignmentStatus | undefined;
   const done = assignment.status === "COMPLETED";
   const f = incident.facts;
+  const pin = incident.sharedLocation;
   // Conditions where "no" is the dangerous answer (breathing, conscious) flip the danger tone.
   const safety = SAFETY.filter((s) => f[s.key] !== null).map((s) => {
     const yes = f[s.key] === true;
@@ -82,8 +83,14 @@ export default function Responder() {
         <ExtractionNotice incident={incident} />
 
         <section className="card">
-          <h2 className="card-title">Location <span className="hint">typed by caller, unverified</span></h2>
-          {f.locationText ? <p className="big-location">{f.locationText}</p> : <LocationLine text={null} />}
+          <h2 className="card-title">Location <span className="hint">{pin ? "shared by caller" : "typed by caller"}, unverified</span></h2>
+          {f.locationText || pin?.label ? <p className="big-location">{pin?.label ?? f.locationText}</p> : !pin && <LocationLine text={null} />}
+          {pin && (
+            <p className="muted small mono">
+              {pin.latitude.toFixed(5)}, {pin.longitude.toFixed(5)}{pin.accuracyMeters != null && ` · ±${Math.round(pin.accuracyMeters)} m`}
+              {pin.label && f.locationText && <span> · caller typed: {f.locationText}</span>}
+            </p>
+          )}
         </section>
 
         <section className="card">

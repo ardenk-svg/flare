@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import type { CallerFactPatch, Evidence, Recommendation } from "@flare/contracts";
 import {
   advanceAssignment, applyIntakePatch, closeIncident, confirmDispatchAndAssign, connectFlare, getMyRole, listAssignments, listIncidents,
-  recordInbound, resolveIncident, type FlareConnection,
+  recordInbound, recordSentQuestion, recordSharedLocation, resolveIncident, type FlareConnection,
 } from "@flare/data";
 
 const URI = process.env.SPACETIMEDB_URI ?? "ws://127.0.0.1:3000";
@@ -99,6 +99,15 @@ async function main() {
     incidentType: "robbery", violentThreat: true, locationText: "Basement of the Duderstadt Center",
   }, [["incidentType", "getting robbed"], ["violentThreat", "someone is getting robbed"], ["locationText", "basement of the duderstadt"]],
   "Caller reports a robbery in the basement of the Duderstadt Center and says they are hiding.", THREAT);
+  await recordSentQuestion(agent.conn, { conversationKey: "seed:5", question: "[SIMULATION] Are you somewhere safe right now?", delivered: true });
+  await say(agent, "seed:5", "yes im locked in a study room", { callerStatus: "hiding in a locked room" },
+    [["callerStatus", "im locked in a study room"]],
+    "Caller reports a robbery in the basement of the Duderstadt Center. Caller is hiding in a locked study room.", THREAT);
+  await recordSharedLocation(agent.conn, {
+    provider: "seed", conversationKey: "seed:5", route: ROUTE, messageId: "seed-pin-5", receivedAt: new Date().toISOString(),
+    latitude: 42.29107, longitude: -83.71623, accuracyMeters: 15, label: "Duderstadt Center, Ann Arbor", source: "IMESSAGE_PIN",
+  });
+  await recordSentQuestion(agent.conn, { conversationKey: "seed:5", question: "[SIMULATION] Did you see a weapon?", delivered: true });
 
   // 6. Collecting, critical: unconscious and not breathing, no location yet.
   await say(agent, "seed:6", "Simulation: my roommate collapsed and he isn't breathing", {

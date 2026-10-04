@@ -1,6 +1,7 @@
 // Shared shapes come from @flare/contracts. IncidentView is the UI projection of a contract Incident.
-import type { CallerFactField, CallerFacts, Evidence, ExtractionState, IncidentStatus, Service } from "@flare/contracts";
+import type { CallerFactField, CallerFacts, Evidence, ExtractionState, IncidentStatus, Service, SharedLocation } from "@flare/contracts";
 export type {
+  SharedLocation,
   Assignment, AssignmentStatus, CallerFactField, CallerFacts, Evidence, ExtractionState, IncidentStatus, Service, Unit,
 } from "@flare/contracts";
 export { ASSIGNMENT_ORDER } from "@flare/contracts";
@@ -21,23 +22,14 @@ export interface IncidentView {
   extraction: { state: ExtractionState; message?: string };
   /** Dispatcher's reason when status is CLOSED. */
   closeReason?: string | null;
-  /** Caller-shared coordinates. Optional until the backend stores them (#28). */
+  /** Caller-shared coordinates (iMessage pin or Find My). */
   sharedLocation?: SharedLocation | null;
-  /** Caller and agent messages for this case. Optional until the dispatcher can read them (#29). */
+  /** Caller and agent messages for this case. Dispatcher only; absent for responders and fixtures without one. */
   conversation?: ConversationMessage[];
-  /** Backend-recorded activity. Optional until #29; the UI derives a limited stream from timestamps without it. */
+  /** Backend activity log (dispatcher only). Without it the UI derives a limited stream from timestamps. */
   events?: ActivityEvent[];
   createdAt: string;
   updatedAt: string;
-}
-
-export interface SharedLocation {
-  latitude: number;
-  longitude: number;
-  accuracyMeters?: number | null;
-  label?: string | null;
-  source: "IMESSAGE_PIN" | "FIND_MY";
-  sharedAt: string;
 }
 
 export interface ConversationMessage {

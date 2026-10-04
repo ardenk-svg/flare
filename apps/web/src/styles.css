@@ -320,7 +320,7 @@ button { font: inherit; }
 .fresh { animation: flash 2.2s ease-out; }
 
 /* Activity */
-.feed { list-style: none; margin: 0; padding: 0 0 0 4px; display: grid; }
+.feed { list-style: none; margin: 0; padding: 0 0 0 4px; display: grid; max-height: 380px; overflow-y: auto; }
 .feed li { position: relative; display: grid; grid-template-columns: 76px 1fr; gap: 10px; padding: 5px 0 5px 14px; font-size: 14px; border-left: 2px solid var(--border); }
 .feed li::before { content: ""; position: absolute; left: -5px; top: 11px; width: 8px; height: 8px; border-radius: 50%; background: var(--surface); border: 2px solid var(--border-strong); }
 .feed li.major { font-weight: 650; }

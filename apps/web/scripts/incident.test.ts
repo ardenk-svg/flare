@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { emptyFacts } from "@flare/contracts";
 import {
-  byPriority, categoryOf, deriveSeverity, getActivity, getKnownFacts, getRelevantMissingFacts, recommendationReasons,
+  activityLabel, byPriority, categoryOf, deriveSeverity, getActivity, getKnownFacts, getRelevantMissingFacts, recommendationReasons,
 } from "../src/incident";
 import type { Assignment, CallerFacts, IncidentView } from "../src/types";
 
@@ -38,7 +38,7 @@ test("robbery asks for robbery facts, not fire or medical ones", () => {
 
 test("location is needed only when neither typed nor shared", () => {
   assert.equal(getRelevantMissingFacts(inc({ fireOrSmoke: true }))[0].key, "locationText");
-  const shared = inc({ fireOrSmoke: true }, { sharedLocation: { latitude: 1, longitude: 2, source: "IMESSAGE_PIN", sharedAt: "2026-10-03T20:00:00Z" } });
+  const shared = inc({ fireOrSmoke: true }, { sharedLocation: { latitude: 1, longitude: 2, accuracyMeters: null, label: null, source: "IMESSAGE_PIN", sharedAt: "2026-10-03T20:00:00Z" } });
   assert.ok(!getRelevantMissingFacts(shared).some((m) => m.key === "locationText"));
 });
 
@@ -69,7 +69,20 @@ test("derived activity uses only stored timestamps, newest first", () => {
   assert.ok(!events.some((e) => e.kind === "UNIT_ACCEPTED"));
 });
 
-test("backend events replace the derived stream", () => {
-  const i = inc({}, { events: [{ id: "e1", kind: "CALLER_MESSAGE", at: "2026-10-03T20:00:05Z" }] });
-  assert.deepEqual(getActivity(i, []), { events: i.events, derived: false });
+test("backend events replace the derived stream, newest first, ties by id", () => {
+  const at = "2026-10-03T20:00:05.000Z";
+  const i = inc({}, { events: [
+    { id: "9", kind: "INCIDENT_CREATED", at }, { id: "10", kind: "CALLER_MESSAGE", at },
+    { id: "11", kind: "LOCATION_RECEIVED", at: "2026-10-03T20:00:09.000Z", detail: "IMESSAGE_PIN" },
+  ] });
+  const { events, derived } = getActivity(i, []);
+  assert.equal(derived, false);
+  assert.deepEqual(events.map((e) => e.id), ["11", "10", "9"]);
+});
+
+test("event details are translated, never shown raw", () => {
+  assert.equal(activityLabel({ id: "1", kind: "LOCATION_RECEIVED", at: "", detail: "IMESSAGE_PIN" }), "Location received (shared iMessage pin)");
+  assert.equal(activityLabel({ id: "1", kind: "CALLER_NOTIFIED", at: "", detail: "ASSIGNMENT_EN_ROUTE" }), "Caller told a unit is en route");
+  assert.equal(activityLabel({ id: "1", kind: "EXTRACTION_FAILED", at: "", detail: "TIMEOUT" }), "Couldn't read a caller message");
+  assert.equal(activityLabel({ id: "1", kind: "FACTS_UPDATED", at: "", fields: ["weaponPresent"] }), "Updated: Weapon present");
 });

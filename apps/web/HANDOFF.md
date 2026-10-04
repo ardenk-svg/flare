@@ -31,7 +31,7 @@ Coverage, in order:
 Cross-client checks pass only when an update arrives by subscription, since the observing client never re-reads on its own.
 
 ## Demo data: `npm run seed:demo -w @flare/web -- [--dispatcher <hex>] [--responder <hex>]`
-**Resets the local database** (refuses a non-local `SPACETIMEDB_URI`) and seeds eight simulated incidents. One is resolved and one is dispatched with FIRE-01 en route. Two are ready for review (FIRE + EMS, and the demo robbery with POLICE). A violent threat and a critical unconscious caller are both collecting with no location. A minor collision matched no rule, and one test text was closed without dispatch. The seed can't add coordinates until #28 lands. Pass your browser identity hexes to grant DISPATCHER and RESPONDER `FIRE-01` in the same step. Use it for UI review and rehearsals, never on the shared database.
+**Resets the local database** (refuses a non-local `SPACETIMEDB_URI`) and seeds eight simulated incidents. One is resolved and one is dispatched with FIRE-01 en route. Two are ready for review (FIRE + EMS, and the demo robbery with POLICE). A violent threat and a critical unconscious caller are both collecting with no location. A minor collision matched no rule, and one test text was closed without dispatch. The robbery also gets an iMessage pin with coordinates, two agent questions, and a caller reply, so the map, transcript, and activity log all have live data. Pass your browser identity hexes to grant DISPATCHER and RESPONDER `FIRE-01` in the same step. Use it for UI review and rehearsals, never on the shared database.
 
 ## UI (issue #17)
 - Plain CSS tokens on `:root` in `src/styles.css`, no new dependency. `App.tsx` owns the SIMULATION strip and top bar, so every screen (including the access gate) shows the label.
@@ -45,18 +45,19 @@ Cross-client checks pass only when an update arrives by subscription, since the 
 - Layout: queue | center (header, summary, location, Known / Still needed, caller conversation) | right (recommended response + dispatch, assignments, live activity). The center and right columns stack when the detail pane is under 820px.
 - `src/incident.ts` holds pure display helpers: `deriveSeverity` (display only, not stored), `categoryOf`, `getKnownFacts`, `getRelevantMissingFacts`, `recommendationReasons` (maps rule IDs to readable reasons until #30 exports them), `getActivity`, `byPriority`. Checked by `npm test -w @flare/web`.
 - `src/console.tsx` holds the panels. `Dispatcher.tsx` composes them.
-- `IncidentView` gains optional `sharedLocation`, `conversation`, `events`, and `closeReason`. Live mode fills only `closeReason` today, and each panel falls back when the others are absent:
-  - Location: typed text plus the caller's quote, and no map.
-  - Conversation: the caller's evidence quotes, labelled as quotes.
-  - Activity: derived only from stored timestamps. Intermediate assignment steps have no timestamp of their own and aren't shown.
-- Map: OSM tiles drawn as plain `<img>` elements around the coordinates, with no new dependency, so `package.json` and the lockfile are unchanged. A failed tile switches to a text fallback. Fixture incident `INC-DEMO-3` has coordinates.
-- `FlareClient.closeIncident` is wired to Person 3's `closeIncident` (live) and to the fixture. "Close without dispatch" appears only for undispatched incidents with no assignments, and it requires a reason.
+- Live data (#28/#29, merged in #33): `liveClient.toView` maps `sharedLocation`, `listConversation` into `conversation`, and `listIncidentEvents` into `events`. It subscribes to `incident_conversation_view` and `incident_event_view`, so the transcript and activity log update by push with no polling. Both views are dispatcher-only. Responders get neither, but they see `sharedLocation` on their own incident, and the responder page shows the pin.
+- Fallbacks, still used in fixture mode and for any incident the views don't cover:
+  - The conversation panel shows the caller's evidence quotes.
+  - Activity is derived from stored timestamps without inventing steps.
+  - The location card shows typed text when there's no pin.
+- Event `detail` codes (`TYPED`, `IMESSAGE_PIN`, `FIND_MY`, notification kinds, extraction error codes) are translated into readable text or dropped by `activityLabel`, never shown raw.
+- Map: OSM tiles drawn as plain `<img>` elements around the coordinates, with no new dependency. A failed tile switches to a text fallback.
+- `FlareClient.closeIncident` is wired to `closeIncident` (live) and to the fixture. "Close without dispatch" appears only for undispatched incidents with no assignments, and it requires a reason.
 - Copy: the single global banner reads "DEMO SYSTEM — Not connected to emergency services". Rule IDs and "(simulated)" labels are gone from the main UI. Backend rejection codes are shown as plain sentences.
-- Fixture key bumped to `flare-fixture-v2` (adds two units per service, a robbery with conversation and location, and a critical medical case).
-- Phase 2, once these land:
-  - #28: new facts show up in Known automatically, because the helpers read fact keys loosely. `sharedLocation` needs mapping in `liveClient.toView`.
-  - #29: map the transcript into `conversation` and the activity log into `events`.
-  - #30: replace the `RULES` map in `incident.ts`.
+- Fixture key is `flare-fixture-v2`, with two units per service, a robbery with conversation and location, and a critical medical case.
+- **Still waiting on others:**
+  - #30 (Person 2): readable reasons come from the `RULES` map in `incident.ts` until #30 exports rule labels from `@flare/contracts`. Switch to that export when it lands.
+  - #31 (Person 1): real callers' pins arrive once the agent calls `recordSharedLocation`. No UI change is needed. Verify with `npm run e2e` once it exists.
 
 ## Live mode in the browser
 1. Setup above, then `cd apps/web && cp .env.example .env.local && npm run dev`.
@@ -83,11 +84,20 @@ Cross-client checks pass only when an update arrives by subscription, since the 
 - `seed:demo` against local, then a throwaway server render of both routes (dispatcher, responder FIRE-01, and responder EMS-01 with no assignment) against the live snapshot. All three rendered with no errors, and no message IDs appeared in the text.
 - **Not yet done:** eyeballing the pages in a real browser, and before/after screenshots for the #17 PR. Check focus rings, the 1440x900 side-by-side layout, and phone width by eye.
 
-## Checks run for the dispatcher console (2026-10-03, local SpacetimeDB)
-- `npm run check` (repo root): pass, including `npm test -w @flare/web` (8 helper tests).
-- `npm run smoke:live -w @flare/web`: 47/47. New checks cover severity, readable reasons, and missing facts on live data; activity updating from a pushed EN_ROUTE; and close-without-dispatch (responder rejected, reason required, CLOSED with reason pushed).
-- `npm run seed:demo -w @flare/web`: seeds 8 incidents.
-- **Not done:** no visual browser pass of the new layout yet. Check 13–16" widths, the map tiles, focus rings, and the conversation dialog by eye.
+## Checks run for the dispatcher console (2026-10-03, local SpacetimeDB 2.10.2, module from #33)
+- `npm run check` (repo root): pass, including `npm test -w @flare/web` (9 helper tests).
+- `FLARE_DB=flare-check npm run smoke:live -w @flare/web`: 56/56 on two consecutive runs. It covers:
+  - the transcript (caller message, agent question with delivery state, no route or conversation key)
+  - backend events (created, recommended, typed location, accepted, en route)
+  - responders getting no transcript or log
+  - a shared pin pushed to the dispatcher and satisfying the location gate
+  - close without dispatch
+- `seed:demo` against `flare-check`, then read back through `createLiveClient`:
+  - six units
+  - the robbery is HIGH and READY_FOR_REVIEW, with the pin
+  - "Still needed" lists weapon, suspects, injuries, and people involved
+  - five transcript lines and readable events
+- **Not done:** no visual browser pass yet. Check 13–16" widths, the map tiles, focus rings, and the conversation dialog by eye.
 
 ## Unresolved / needs others
 - **Root `npm run check` fails on main in `apps/agent`, not the web app.** Person 1's merged orchestrator predates Person 3's contract change: `data-port.ts` omits `route` in `recordInbound`, and the agent test fixtures lack `route`, `extractionState`, and `caseEpoch`. Person 1 needs to rebase.
