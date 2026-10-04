@@ -92,6 +92,8 @@ export interface CallerMessage {
 }
 
 export interface InboundTurn {
+  /** Trusted provider location exists; no coordinates or attachment are sent to the model. */
+  hasSharedLocation?: boolean;
   conversationKey: string; // trusted internal routing key
   intakeRevision: number;
   messages: CallerMessage[]; // new ordered caller messages
@@ -149,7 +151,7 @@ export type IncidentStatus = "COLLECTING" | "READY_FOR_REVIEW" | "DISPATCHED" | 
 export type AssignmentStatus = "OFFERED" | "ACCEPTED" | "EN_ROUTE" | "ON_SCENE" | "COMPLETED";
 export type UnitStatus = "AVAILABLE" | "BUSY";
 export type InboundStatus = "RECEIVED" | "APPLIED";
-export type NotificationKind = "DISPATCH_CONFIRMED" | "ASSIGNMENT_EN_ROUTE" | "INFO_REPLY";
+export type NotificationKind = "DISPATCH_CONFIRMED" | "ASSIGNMENT_EN_ROUTE" | "INFO_REPLY" | "DISPATCHER_REPLY";
 export type NotificationStatus = "PENDING" | "SENT" | "FAILED";
 export type QuestionDelivery = "SENT" | "FAILED";
 export type Role = "ADMIN" | "AGENT" | "DISPATCHER" | "RESPONDER";
@@ -227,14 +229,16 @@ export interface SharedLocation {
 export interface ConversationMessage {
   key: string;
   incidentId: string;
-  sender: "CALLER" | "AGENT";
+  sender: "CALLER" | "AGENT" | "DISPATCHER";
   text: string;
   at: string;
-  /** AGENT rows only. */
-  delivery: "SENT" | "FAILED" | null;
+  /** Outbound AGENT or DISPATCHER rows only. */
+  delivery: "QUEUED" | "SENT" | "FAILED" | null;
 }
 
 export type IncidentEventKind =
+  | "DISPATCHER_TAKEOVER"
+  | "AGENT_RESUMED"
   | "INCIDENT_CREATED"
   | "CALLER_MESSAGE"
   | "FACTS_UPDATED"
@@ -280,6 +284,8 @@ export interface Assignment {
 }
 
 export interface ConversationContext {
+  /** Present while a human dispatcher owns the active caller conversation. */
+  dispatcherIdentity?: string | null;
   conversationKey: string;
   route: ConversationRoute;
   /** Current intake case. Messages and questions from earlier cases are excluded below. */

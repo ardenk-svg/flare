@@ -182,12 +182,15 @@ const NOTIFIED: Record<string, string> = {
   DISPATCH_CONFIRMED: "Caller told help is being sent",
   ASSIGNMENT_EN_ROUTE: "Caller told a unit is en route",
   INFO_REPLY: "Status reply sent to caller",
+  DISPATCHER_REPLY: "Dispatcher message delivered to caller",
 };
 
 /** Readable line for an event. Internal codes in `detail` are translated or dropped, never shown raw. */
 export function activityLabel(e: ActivityEvent): string {
   const unit = e.unitId ?? "Unit";
   switch (e.kind) {
+    case "DISPATCHER_TAKEOVER": return "Dispatcher took over the caller conversation";
+    case "AGENT_RESUMED": return "Automated caller questions resumed";
     case "INCIDENT_CREATED": return "Incident created";
     case "CALLER_MESSAGE": return "Caller message received";
     case "FACTS_UPDATED": return e.fields?.length ? `Updated: ${e.fields.map((f) => FACT_LABELS[f] ?? f).join(", ")}` : "Facts updated";

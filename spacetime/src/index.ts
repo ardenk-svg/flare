@@ -247,6 +247,13 @@ const incidentEvent = table(
   }
 );
 
+/** Independent table so takeover can be added without rewriting existing incident rows. */
+const conversationControl = table({ name: 'conversation_control' }, {
+  incidentId: t.u64().primaryKey(),
+  dispatcherIdentity: t.identity(),
+  updatedAt: t.timestamp(),
+});
+
 const spacetimedb = schema({
   roleGrant,
   unit,
@@ -257,6 +264,7 @@ const spacetimedb = schema({
   notification,
   outboundMessage,
   incidentEvent,
+  conversationControl,
 });
 export default spacetimedb;
 
@@ -520,6 +528,7 @@ export const resetDemo = spacetimedb.reducer(ctx => {
   for (const row of [...ctx.db.notification.iter()]) ctx.db.notification.id.delete(row.id);
   for (const row of [...ctx.db.outboundMessage.iter()]) ctx.db.outboundMessage.id.delete(row.id);
   for (const row of [...ctx.db.incidentEvent.iter()]) ctx.db.incidentEvent.id.delete(row.id);
+  for (const row of [...ctx.db.conversationControl.iter()]) ctx.db.conversationControl.incidentId.delete(row.incidentId);
   for (const row of [...ctx.db.assignment.iter()]) ctx.db.assignment.id.delete(row.id);
   for (const row of [...ctx.db.incident.iter()]) ctx.db.incident.id.delete(row.id);
   for (const row of [...ctx.db.inboundMessage.iter()]) ctx.db.inboundMessage.id.delete(row.id);
@@ -586,9 +595,10 @@ export const recordSharedLocation = spacetimedb.reducer(
   (ctx, args) => {
     requireRole(ctx, 'AGENT');
     if (!LOCATION_SOURCES.includes(args.source)) throw new SenderError(`INVALID_LOCATION_SOURCE: ${args.source}`);
+    if (args.messageId.trim() === '') throw new SenderError('INVALID_MESSAGE_ID');
     if (!Number.isFinite(args.latitude) || args.latitude < -90 || args.latitude > 90) throw new SenderError('INVALID_LATITUDE');
     if (!Number.isFinite(args.longitude) || args.longitude < -180 || args.longitude > 180) throw new SenderError('INVALID_LONGITUDE');
-    if (args.accuracyMeters !== undefined && !(args.accuracyMeters >= 0)) throw new SenderError('INVALID_ACCURACY');
+    if (args.accuracyMeters !== undefined && (!Number.isFinite(args.accuracyMeters) || args.accuracyMeters < 0)) throw new SenderError('INVALID_ACCURACY');
     const convo = upsertConversation(ctx, args.conversationKey, args.route);
     const dedupeKey = `${args.provider}\u0000${args.conversationKey}\u0000${args.messageId}`;
     if (ctx.db.inboundMessage.dedupeKey.find(dedupeKey)) return;
@@ -781,7 +791,8 @@ export const completeInboundWithoutPatch = spacetimedb.reducer(
       ctx.db.inboundMessage.id.update({ ...m, status: 'APPLIED', lastError: undefined, appliedAt: ctx.timestamp });
     }
     settleExtractionState(ctx, convo);
-    if (replyText !== undefined && replyText.trim() !== '') {
+    const humanControl = convo.activeIncidentId !== undefined && ctx.db.conversationControl.incidentId.find(convo.activeIncidentId);
+    if (replyText !== undefined && replyText.trim() !== '' && !(intent === 'OTHER' && humanControl)) {
       enqueue(ctx, {
         conversationId: convo.id,
         incidentId: convo.activeIncidentId,
@@ -847,7 +858,7 @@ export const ackNotification = spacetimedb.reducer(
       caseEpoch,
       incidentId: job.incidentId,
       notificationId,
-      kind: 'NOTIFICATION',
+      kind: existing?.kind ?? 'NOTIFICATION',
       text: job.text,
       delivery: delivered ? 'SENT' : 'FAILED',
       at: ctx.timestamp,
@@ -859,6 +870,56 @@ export const ackNotification = spacetimedb.reducer(
 );
 
 // ---- Dispatcher operations ----
+
+function requireOpenIncident(ctx: Ctx, incidentId: bigint) {
+  const inc = ctx.db.incident.id.find(incidentId);
+  if (!inc) throw new SenderError('NOT_FOUND: incident');
+  if (inc.status === 'CLOSED' || inc.status === 'RESOLVED') throw new SenderError('INCIDENT_ENDED');
+  return inc;
+}
+
+export const takeOverConversation = spacetimedb.reducer({ incidentId: t.u64() }, (ctx, { incidentId }) => {
+  requireRole(ctx, 'DISPATCHER');
+  requireOpenIncident(ctx, incidentId);
+  const current = ctx.db.conversationControl.incidentId.find(incidentId);
+  if (current) {
+    if (!current.dispatcherIdentity.isEqual(ctx.sender)) throw new SenderError('TAKEN_OVER: another dispatcher owns this conversation');
+    return;
+  }
+  ctx.db.conversationControl.insert({ incidentId, dispatcherIdentity: ctx.sender, updatedAt: ctx.timestamp });
+  logEvent(ctx, incidentId, 'DISPATCHER_TAKEOVER', {});
+});
+
+export const releaseConversation = spacetimedb.reducer({ incidentId: t.u64() }, (ctx, { incidentId }) => {
+  const grant = requireRole(ctx, 'DISPATCHER');
+  requireOpenIncident(ctx, incidentId);
+  const current = ctx.db.conversationControl.incidentId.find(incidentId);
+  if (!current) return;
+  if (!current.dispatcherIdentity.isEqual(ctx.sender) && grant.role !== 'ADMIN') throw new SenderError('NOT_CONVERSATION_OWNER');
+  ctx.db.conversationControl.incidentId.delete(incidentId);
+  logEvent(ctx, incidentId, 'AGENT_RESUMED', {});
+});
+
+export const sendDispatcherMessage = spacetimedb.reducer(
+  { incidentId: t.u64(), text: t.string(), clientMessageId: t.string() },
+  (ctx, { incidentId, text, clientMessageId }) => {
+    requireRole(ctx, 'DISPATCHER');
+    const inc = requireOpenIncident(ctx, incidentId);
+    const control = ctx.db.conversationControl.incidentId.find(incidentId);
+    if (!control?.dispatcherIdentity.isEqual(ctx.sender)) throw new SenderError('NOT_CONVERSATION_OWNER');
+    const body = text.trim();
+    if (!body || body.length > 2000) throw new SenderError('INVALID_MESSAGE: enter 1–2000 characters');
+    if (!clientMessageId.trim() || clientMessageId.length > 100) throw new SenderError('INVALID_MESSAGE_ID');
+    const kind = `DISPATCHER:${ctx.sender.toHexString()}:${clientMessageId}`;
+    if ([...ctx.db.outboundMessage.conversationId.filter(inc.conversationId)].some(row => row.kind === kind && row.caseEpoch === inc.caseEpoch)) return;
+    const labelled = body.startsWith('[SIMULATION]') ? body : `[SIMULATION] Dispatcher: ${body}`;
+    const job = ctx.db.notification.insert({ id: 0n, conversationId: inc.conversationId, incidentId, assignmentId: undefined,
+      kind: 'DISPATCHER_REPLY', text: labelled, eventAssignmentStatus: undefined, eventAt: ctx.timestamp,
+      status: 'PENDING', attempts: 0, lastError: undefined, sentAt: undefined });
+    ctx.db.outboundMessage.insert({ id: 0n, conversationId: inc.conversationId, caseEpoch: inc.caseEpoch, incidentId,
+      notificationId: job.id, kind, text: labelled, delivery: 'QUEUED', at: ctx.timestamp });
+  }
+);
 
 export const confirmDispatchAndAssign = spacetimedb.reducer(
   { incidentId: t.u64(), confirmedServices: t.array(t.string()), unitIds: t.array(t.string()) },
@@ -1199,7 +1260,7 @@ export const incidentConversationView = spacetimedb.view(
       }
       for (const o of ctx.db.outboundMessage.conversationId.filter(inc.conversationId)) {
         if (o.caseEpoch !== inc.caseEpoch) continue;
-        rows.push({ key: `out:${o.id}`, incidentId: inc.id, sender: 'AGENT', text: o.text, at: o.at, delivery: o.delivery });
+        rows.push({ key: `out:${o.id}`, incidentId: inc.id, sender: o.kind.startsWith('DISPATCHER:') ? 'DISPATCHER' : 'AGENT', text: o.text, at: o.at, delivery: o.delivery });
       }
       rows.sort((a, b) => {
         const d = a.at.microsSinceUnixEpoch - b.at.microsSinceUnixEpoch;
@@ -1220,4 +1281,9 @@ export const incidentEventView = spacetimedb.view(
     if (!grant || (grant.role !== 'DISPATCHER' && grant.role !== 'ADMIN')) return [];
     return [...ctx.db.incidentEvent.iter()];
   }
+);
+
+export const conversationControlView = spacetimedb.view(
+  { name: 'conversation_control_view', public: true }, t.array(conversationControl.rowType),
+  ctx => hasRole(ctx, 'DISPATCHER', 'AGENT') ? [...ctx.db.conversationControl.iter()] : []
 );

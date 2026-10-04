@@ -114,6 +114,26 @@ npm run agent:imessage      # or use a real iMessage thread via Photon
 
 Setup for each part, including role grants and the shared Maincloud database, is in the handoffs: [agent](apps/agent/HANDOFF.md), [intake](packages/intake/HANDOFF.md), [database](spacetime/HANDOFF.md), [web](apps/web/HANDOFF.md).
 
+**One-phone local demo** (SpacetimeDB CLI on `PATH`, or its executable path in `.env` as `FLARE_SPACETIME_BIN`):
+
+```sh
+npm run e2e                 # starts local database, phone agent, one dispatcher and one responder tab
+npm run e2e:auto            # real agent/database, fixture extraction and fake messages; no keys needed
+npm run e2e:auto -- --live-gemini  # same loop with live Gemini extraction
+```
+
+The runner uses the current checkout, installs module dependencies if needed, and keeps its local database, credentials and logs in ignored `.flare/`. It resets local demo incidents by default; use `npm run e2e -- --keep` to preserve them. `--wipe` is an explicit local schema reset. `FLARE_DB_PORT`, `FLARE_WEB_PORT`, and `FLARE_DB` select the local stack. Ctrl+C waits for cleanup of its worker, web server, role bridge and database; repeated interrupts share the same cleanup.
+
+In Messages, send **Send My Current Location**, a location vCard, or an Apple Maps link containing explicit coordinates. The agent stores a shared pin directly; Gemini never receives the location attachment. The dispatcher shows coordinates and the map, and delivered or failed replies appear in the transcript.
+
+Find My is enabled by default for the one-phone demo (`FLARE_FIND_MY_ENABLED=0` disables it). Optionally set `FLARE_DEMO_PHONE` to your caller's E.164 number; otherwise it binds the first direct caller and conversation. Text **"share location"** to request sharing. Incoming Find My cards are recognized through the native iMessage metadata and resolved with `locations.get(caller address)`, even if `locations.list()` fails. A share card alone does not contain coordinates. Cached `legacy`/`shallow` snapshots are labelled **Cached Find My location**, with the provider capture time when available; they are not evidence of fresh GPS. After closing a case, request sharing again for the next case. These behaviors follow [Photon's locations API](https://photon.codes/docs/advanced-kits/imessage/locations).
+
+The dispatcher can **Take over** an active conversation, send labelled messages, and **Return to agent**. Automated questions and generic replies pause during takeover; extraction, caller-requested status replies and committed unit notifications continue. Only the controlling dispatcher can send a message, and the transcript shows queued, sent or failed delivery. Fire, EMS and police use the same assignment stages. Use the single responder tab's Unit dropdown for all six units. The local runner automatically grants each selected unit's separate browser identity through a temporary loopback bridge; ordinary web deployments still use explicit role grants. Existing dispatcher or differently scoped responder grants cannot be replaced by the bridge.
+
+The agent checks an already-shared Find My snapshot before asking a report's location question. Existing pins also set a boolean in model context; coordinates and attachments stay outside Gemini. A final delivery guard suppresses address/location questions when the case already has a pin or typed location. Automatic lookup cannot reuse a previous case's sharing binding.
+
+For payload diagnostics, stop the designated phone worker before running `npm run agent:probe:locations -- --seconds=60`, then restart the worker. The probe records incoming shapes and caller-specific API availability without logging handles or coordinates. Keep exactly one inbox consumer running.
+
 ## Testing
 
 | Suite | Command | Last recorded result |
@@ -122,7 +142,7 @@ Setup for each part, including role grants and the shared Maincloud database, is
 | Database adapter checks | `npm run check:data:live` | 64/64 |
 | **Live Gemini evaluation**: 16 fixtures plus the 4-step threaded demo | `npm run eval -w @flare/intake` | **20/20** on `gemini-3.5-flash-lite`, p50 1.1 s, p95 2.6 s ([report](fixtures/results/2026-10-03T21-48-23-gemini-3.5-flash-lite.md)) |
 | Extraction and rule tests (offline, canned model output) | `npm test -w @flare/intake` | all pass |
-| Agent orchestration tests | `npm test -w @flare/agent` | 17/17 before the latest contract change |
+| Agent orchestration and location tests | `npm test -w @flare/agent` | 36/36 |
 
 The extraction suite covers 16 caller-message fixtures, including corrections, explicit negatives, uncertainty, contradictory counts, multi-message batches, and prompt injection.
 
@@ -135,7 +155,6 @@ Verified working:
 - The agent's Photon cloud connection reaches the listening state.
 
 In progress:
-- The agent package needs a rebase onto the latest shared contract (`route`, `extractionState`, `caseEpoch`), so root `npm run check` currently fails in `apps/agent`.
 - The shared Maincloud database and a real phone-to-dashboard round trip have not been recorded yet. The [integration board](NEXT_STEPS.md) tracks the remaining steps.
 
 ## Team

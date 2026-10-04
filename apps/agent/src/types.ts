@@ -21,6 +21,16 @@ export interface ReplyPort {
   send(text: string): Promise<void>;
 }
 
+export interface NormalizedSharedLocation extends Omit<NormalizedInboundMessage, "text"> {
+  latitude: number;
+  longitude: number;
+  accuracyMeters?: number;
+  label?: string;
+  source: "IMESSAGE_PIN" | "FIND_MY";
+}
+
+export type SharedLocationHandler = (message: NormalizedSharedLocation) => Promise<void>;
+
 export type InboundMessageHandler = (
   message: NormalizedInboundMessage,
   reply: ReplyPort,

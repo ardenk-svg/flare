@@ -83,6 +83,16 @@ export const ConversationContextRow = __t.object("ConversationContextRow", {
 });
 export type ConversationContextRow = __Infer<typeof ConversationContextRow>;
 
+export const ConversationControl = __t.object("ConversationControl", {
+  incidentId: __t.u64(),
+  dispatcherIdentity: __t.identity(),
+  updatedAt: __t.timestamp(),
+});
+export type ConversationControl = __Infer<typeof ConversationControl>;
+
+export const ConversationControlView = __t.object("ConversationControlView", {});
+export type ConversationControlView = __Infer<typeof ConversationControlView>;
+
 export const ConversationMessageRow = __t.object("ConversationMessageRow", {
   key: __t.string(),
   incidentId: __t.u64(),

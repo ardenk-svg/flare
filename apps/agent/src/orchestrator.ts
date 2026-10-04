@@ -10,10 +10,13 @@ import {
 
 import { toConversationRoute, toProviderRoute, type AgentDataPort, type ExtractionFailure } from "./data-port.js";
 import { AgentStateStore } from "./state-store.js";
+import { ConversationQueue } from "./conversation-queue.js";
 import type {
   InboundMessageHandler,
   ReplyPort,
   RouteSender,
+  SharedLocationHandler,
+  NormalizedInboundMessage,
 } from "./types.js";
 
 export interface OrchestratorLogger {
@@ -29,9 +32,12 @@ export interface AgentOrchestratorOptions {
   sendRoute: RouteSender;
   logger?: OrchestratorLogger;
   maxStaleRetries?: number;
+  requestLocation?: (message: NormalizedInboundMessage) => Promise<string>;
+  lookupSharedLocation?: (message: NormalizedInboundMessage, caseEpoch?: number) => Promise<import("./types.js").NormalizedSharedLocation | null>;
 }
 
 const STATUS_QUERY = /^\s*(?:any\s+updates?|status|what(?:'s|\s+is)\s+(?:the\s+)?status|what(?:'s|\s+is)\s+happening)\s*[?.!]*\s*$/iu;
+const LOCATION_QUESTION = /\b(?:location|building|entrance|address)\b|\bwhere (?:are you|is (?:the )?(?:incident|smoke|fire)|did (?:it|this|that) happen)\b/i;
 const OTHER_REPLY =
   "[SIMULATION] I can record a mock incident report or share the current mock assignment status.";
 
@@ -60,9 +66,10 @@ function buildTurn(context: ConversationContext): InboundTurn {
     conversationKey: context.conversationKey,
     intakeRevision: context.intakeRevision,
     messages: context.pendingMessages,
-    recentMessages: hasActiveIncident ? context.recentMessages : [],
+    recentMessages: hasActiveIncident ? context.recentMessages.filter(m => !/^\[(?:Shared location|Find My|Unsupported|Unreadable shared)/.test(m.text)) : [],
     currentFacts: hasActiveIncident ? context.currentFacts : emptyFacts(),
     currentSummary: hasActiveIncident ? context.currentSummary : "",
+    hasSharedLocation: !!context.activeIncident?.sharedLocation,
     lastQuestion: hasActiveIncident ? context.lastQuestion : null,
   };
 }
@@ -93,6 +100,9 @@ export class AgentOrchestrator {
   readonly #sendRoute: RouteSender;
   readonly #logger: OrchestratorLogger;
   readonly #maxStaleRetries: number;
+  readonly #queue = new ConversationQueue();
+  readonly #requestLocation: AgentOrchestratorOptions["requestLocation"];
+  readonly #lookupSharedLocation: AgentOrchestratorOptions["lookupSharedLocation"];
 
   constructor(options: AgentOrchestratorOptions) {
     this.#data = options.data;
@@ -102,11 +112,13 @@ export class AgentOrchestrator {
     this.#sendRoute = options.sendRoute;
     this.#logger = options.logger ?? console;
     this.#maxStaleRetries = options.maxStaleRetries ?? 2;
+    this.#requestLocation = options.requestLocation;
+    this.#lookupSharedLocation = options.lookupSharedLocation;
   }
 
-  readonly handleInbound: InboundMessageHandler = async (message, reply) => {
+  readonly handleInbound: InboundMessageHandler = (message, reply) => this.#queue.run(message.conversationKey, async () => {
     await this.#state.rememberRoute(message.conversationKey, message.route);
-    await this.#data.recordInbound({
+    const recorded = await this.#data.recordInbound({
       provider: message.platform,
       conversationKey: message.conversationKey,
       route: toConversationRoute(message.route),
@@ -118,7 +130,54 @@ export class AgentOrchestrator {
         },
       ],
     });
-    await this.#processConversation(message.conversationKey, reply);
+    if (message.platform === "imessage" && /^\s*(?:share (?:my )?location|find my|request location)\s*[.!?]*\s*$/i.test(message.text) && recorded.pendingMessages.some(pending => pending.id === message.providerMessageId)) {
+      const replyText = this.#requestLocation
+        ? await this.#requestLocation(message)
+        : "[SIMULATION] Use Send My Current Location in Messages, or send an Apple Maps link with your pin. Find My requests are not enabled.";
+      await this.#data.completeInboundWithoutPatch({ conversationKey: message.conversationKey, messageIds: [message.providerMessageId], intent: "OTHER", replyText });
+      return;
+    }
+    await this.#processConversation(message.conversationKey, reply, message);
+  });
+
+  readonly handleLocation: SharedLocationHandler = message => this.#queue.run(message.conversationKey, async () => {
+    await this.#recordLocation(message);
+  });
+
+  async #recordLocation(message: Parameters<SharedLocationHandler>[0]): Promise<void> {
+    await this.#state.rememberRoute(message.conversationKey, message.route);
+    await this.#data.recordSharedLocation({
+      provider: message.platform,
+      conversationKey: message.conversationKey,
+      route: toConversationRoute(message.route),
+      messageId: message.providerMessageId,
+      receivedAt: message.receivedAt,
+      latitude: message.latitude,
+      longitude: message.longitude,
+      accuracyMeters: message.accuracyMeters,
+      label: message.label,
+      source: message.source,
+    });
+  }
+
+  readonly handleUnsupported: InboundMessageHandler = message => this.#queue.run(message.conversationKey, async () => {
+    await this.#state.rememberRoute(message.conversationKey, message.route);
+    await this.#data.recordInbound({ provider: message.platform, conversationKey: message.conversationKey,
+      route: toConversationRoute(message.route), messages: [{ id: message.providerMessageId, text: message.text, receivedAt: message.receivedAt }] });
+    await this.#data.completeInboundWithoutPatch({ conversationKey: message.conversationKey, messageIds: [message.providerMessageId], intent: "OTHER",
+      replyText: this.#data.getConversationContext(message.conversationKey)?.dispatcherIdentity ? undefined : "[SIMULATION] I couldn't read that attachment as a location. Please type the building and entrance, or send an Apple Maps pin link." });
+  });
+
+  readonly handleLocationShare: InboundMessageHandler = async (message, reply) => {
+    const pin = await this.#lookupSharedLocation?.(message);
+    if (pin) { await this.handleLocation(pin); return; }
+    await this.#queue.run(message.conversationKey, async () => {
+      await this.#state.rememberRoute(message.conversationKey, message.route);
+      await this.#data.recordInbound({ provider: message.platform, conversationKey: message.conversationKey,
+        route: toConversationRoute(message.route), messages: [{ id: message.providerMessageId, text: message.text, receivedAt: message.receivedAt }] });
+      await this.#data.completeInboundWithoutPatch({ conversationKey: message.conversationKey, messageIds: [message.providerMessageId], intent: "OTHER",
+        replyText: this.#data.getConversationContext(message.conversationKey)?.dispatcherIdentity ? undefined : "[SIMULATION] I received your Find My sharing card, but Photon didn't return coordinates. For this demo, share your current location from Apple Maps as a pin link, or type the building and entrance." });
+    });
   };
 
   async drainPendingIntake(): Promise<void> {
@@ -126,7 +185,7 @@ export class AgentOrchestrator {
     if (keys.length === 0) return;
     this.#logger.info(`Retrying pending intake for ${keys.length} conversation(s).`);
     const results = await Promise.allSettled(
-      keys.map((conversationKey) => this.#processConversation(conversationKey)),
+      keys.map((conversationKey) => this.#queue.run(conversationKey, () => this.#processConversation(conversationKey))),
     );
     const failures = results.filter((result) => result.status === "rejected");
     if (failures.length > 0) {
@@ -134,7 +193,7 @@ export class AgentOrchestrator {
     }
   }
 
-  async #processConversation(conversationKey: string, reply?: ReplyPort): Promise<void> {
+  async #processConversation(conversationKey: string, reply?: ReplyPort, inbound?: NormalizedInboundMessage): Promise<void> {
     for (let staleAttempt = 0; staleAttempt <= this.#maxStaleRetries; staleAttempt += 1) {
       const context = this.#data.getConversationContext(conversationKey);
       if (!context || context.pendingMessages.length === 0) return;
@@ -181,7 +240,7 @@ export class AgentOrchestrator {
           replyText:
             result.intent === "STATUS_QUERY"
               ? renderCommittedStatus(context, this.#data.listAssignments())
-              : OTHER_REPLY,
+              : context.dispatcherIdentity ? undefined : OTHER_REPLY,
         });
         return;
       }
@@ -203,8 +262,17 @@ export class AgentOrchestrator {
         throw error;
       }
 
+      // A Find My share may predate this report. Resolve it before asking for location;
+      // the background snapshot would otherwise sit behind this turn in the queue.
+      const committed = this.#data.getConversationContext(conversationKey);
+      if (inbound && this.#lookupSharedLocation && committed && !committed.activeIncident?.sharedLocation && !committed.currentFacts.locationText?.trim()) {
+        const pin = await this.#lookupSharedLocation({ ...inbound, providerMessageId: `findmy-context-${inbound.providerMessageId}` }, committed.caseEpoch);
+        if (pin) await this.#recordLocation(pin);
+      }
+
       if (
         result.proposedQuestion &&
+        !this.#data.getConversationContext(conversationKey)?.dispatcherIdentity &&
         !(context.lastQuestionDelivery === "SENT" && context.lastQuestion === result.proposedQuestion)
       ) {
         await this.#sendQuestion(conversationKey, result.proposedQuestion, reply);
@@ -218,6 +286,9 @@ export class AgentOrchestrator {
     question: string,
     reply?: ReplyPort,
   ): Promise<void> {
+    const current = this.#data.getConversationContext(conversationKey);
+    if (current?.dispatcherIdentity) return;
+    if (LOCATION_QUESTION.test(question) && (current?.activeIncident?.sharedLocation || current?.currentFacts.locationText?.trim())) return;
     try {
       if (reply) {
         await reply.send(question);

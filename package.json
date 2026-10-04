@@ -16,13 +16,18 @@
     "agent:imessage": "npm run dev:imessage --workspace @flare/agent",
     "agent:echo:terminal": "npm run dev:echo:terminal --workspace @flare/agent",
     "agent:echo:imessage": "npm run dev:echo:imessage --workspace @flare/agent",
+    "agent:probe:locations": "node --env-file-if-exists=.env --import tsx apps/agent/src/location-probe.ts",
+    "e2e": "node --env-file-if-exists=.env --import tsx scripts/e2e.ts",
+    "e2e:auto": "npm run e2e -- auto",
     "build": "npm run build --workspaces --if-present",
     "check": "npm run typecheck && npm test && npm run build",
     "check:data:live": "npm run check --workspace @flare/data",
     "check:module": "npm run typecheck --prefix spacetime && npm run build --prefix spacetime",
     "install:module": "npm ci --prefix spacetime --ignore-scripts --no-audit --no-fund",
-    "test": "npm run test --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present && npm run test:scripts",
+    "test:scripts": "node --import tsx --test scripts/*.test.ts",
+    "typecheck": "npm run typecheck --workspaces --if-present && npm run typecheck:scripts",
+    "typecheck:scripts": "tsc -p scripts/tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

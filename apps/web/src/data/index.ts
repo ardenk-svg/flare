@@ -7,8 +7,8 @@ import { browserTokenStore, createLiveClient } from "./liveClient";
 // `?unit=` gives a responder tab its own identity per unit.
 function routeTokenStore() {
   if (location.pathname.startsWith("/responder")) {
-    const unit = new URLSearchParams(location.search).get("unit");
-    return browserTokenStore(unit ? `responder:${unit}` : "responder");
+    const unit = new URLSearchParams(location.search).get("unit") ?? "FIRE-01";
+    return browserTokenStore(`responder:${unit}`, unit === "FIRE-01" ? { fallbackScope: "responder" } : {});
   }
   return browserTokenStore("dispatcher", { legacyFallback: true });
 }
@@ -21,6 +21,14 @@ export function createClient(): FlareClient {
       throw new Error("Live mode needs VITE_SPACETIMEDB_URI and VITE_SPACETIMEDB_DATABASE");
     return createLiveClient({
       uri: env.VITE_SPACETIMEDB_URI, database: env.VITE_SPACETIMEDB_DATABASE, tokenStore: routeTokenStore(),
+      authorizeDemoResponder: env.DEV && env.VITE_FLARE_DEMO_GRANT_KEY && location.pathname.startsWith("/responder")
+        ? async identity => {
+          const unit = new URLSearchParams(location.search).get("unit") ?? "FIRE-01";
+          const response = await fetch("/__flare_demo/responder", { method: "POST",
+            headers: { "Content-Type": "application/json", "X-Flare-Demo-Key": env.VITE_FLARE_DEMO_GRANT_KEY },
+            body: JSON.stringify({ identity, unit }) });
+          if (!response.ok) throw new Error("Demo responder grant failed.");
+        } : undefined,
     });
   }
   const params = new URLSearchParams(location.search);

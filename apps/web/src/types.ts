@@ -26,6 +26,8 @@ export interface IncidentView {
   sharedLocation?: SharedLocation | null;
   /** Caller and agent messages for this case. Dispatcher only; absent for responders and fixtures without one. */
   conversation?: ConversationMessage[];
+  /** Dispatcher identity currently controlling the caller conversation. */
+  dispatcherIdentity?: string | null;
   /** Backend activity log (dispatcher only). Without it the UI derives a limited stream from timestamps. */
   events?: ActivityEvent[];
   createdAt: string;
@@ -33,14 +35,15 @@ export interface IncidentView {
 }
 
 export interface ConversationMessage {
-  sender: "CALLER" | "AGENT";
+  sender: "CALLER" | "AGENT" | "DISPATCHER";
   text: string;
   at: string;
   /** Agent messages only. */
-  delivery?: "SENT" | "FAILED";
+  delivery?: "QUEUED" | "SENT" | "FAILED";
 }
 
 export type ActivityKind =
+  | "DISPATCHER_TAKEOVER" | "AGENT_RESUMED"
   | "INCIDENT_CREATED" | "CALLER_MESSAGE" | "FACTS_UPDATED" | "LOCATION_RECEIVED" | "SERVICES_RECOMMENDED"
   | "EXTRACTION_FAILED" | "DISPATCH_CONFIRMED" | "UNIT_ASSIGNED" | "UNIT_ACCEPTED" | "UNIT_EN_ROUTE"
   | "UNIT_ON_SCENE" | "UNIT_COMPLETED" | "CALLER_NOTIFIED" | "INCIDENT_RESOLVED" | "INCIDENT_CLOSED";
@@ -87,5 +90,7 @@ export interface FlareClient {
   advanceAssignment(req: { assignmentId: string; next: AssignmentStatus }): Promise<OpResult>;
   resolveIncident(req: { incidentId: string }): Promise<OpResult>;
   closeIncident(req: { incidentId: string; reason: string }): Promise<OpResult>;
+  takeOverConversation(req: { incidentId: string }): Promise<OpResult>;
+  releaseConversation(req: { incidentId: string }): Promise<OpResult>;
+  sendDispatcherMessage(req: { incidentId: string; text: string; clientMessageId: string }): Promise<OpResult>;
 }
-

@@ -3,6 +3,7 @@ import type { NormalizedInboundMessage } from "./types.js";
 export interface SpectrumSpaceEnvelope {
   readonly id: string;
   readonly phone?: string;
+  readonly type?: string;
 }
 
 export interface SpectrumMessageEnvelope {
@@ -11,7 +12,9 @@ export interface SpectrumMessageEnvelope {
   readonly direction: "inbound" | "outbound";
   readonly timestamp: Date;
   readonly sender?: { readonly id: string } | undefined;
-  readonly content: { readonly type: string; readonly text?: string };
+  readonly content: { readonly type: string; readonly text?: string; readonly [field: string]: unknown };
+  readonly miniApp?: { readonly url?: string };
+  readonly balloonBundleId?: string;
 }
 
 /**

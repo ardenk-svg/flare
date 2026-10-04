@@ -8,6 +8,7 @@ export const SYSTEM_INSTRUCTION = `You are the caller-fact extraction step of Fl
 
 INPUT: one JSON object.
 - currentFacts: facts already accepted from earlier caller messages (null = unknown).
+- hasSharedLocation: a trusted provider pin already exists. It is separate from typed caller facts.
 - currentSummary, lastQuestion: earlier intake context.
 - priorMessages: earlier caller messages, already processed. Use them only to understand context. Never cite them.
 - newMessages: the caller messages to interpret now. Every change must cite one of these by id.
@@ -44,11 +45,12 @@ SUMMARY: one or two plain sentences describing everything the caller has reporte
 
 unresolvedFields: fields the caller addressed but left uncertain, ambiguous, or explicitly unknown.
 
-proposedQuestion: at most one short, calm question asking for the single most useful missing fact. Ask for the building and entrance first if locationText is unknown. Do not ask again about something the caller just answered, including an "I don't know" answer to lastQuestion. Use "" when nothing more is needed or the intent is STATUS_QUERY or OTHER. No advice, no promises.`;
+proposedQuestion: at most one short, calm question asking for the single most useful missing fact. Ask for the building and entrance first only if locationText is unknown AND hasSharedLocation is false. If a shared pin exists, ask about another missing caller fact instead; never invent locationText from the pin. Do not ask again about something the caller just answered, including an "I don't know" answer to lastQuestion. Use "" when nothing more is needed or the intent is STATUS_QUERY or OTHER. No advice, no promises.`;
 
 /** Caller text is JSON-encoded so it cannot break out of its data position. */
 export function buildUserPrompt(turn: InboundTurn): string {
   const payload = {
+    hasSharedLocation: turn.hasSharedLocation ?? false,
     currentFacts: turn.currentFacts,
     currentSummary: turn.currentSummary,
     lastQuestion: turn.lastQuestion,

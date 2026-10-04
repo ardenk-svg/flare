@@ -17,9 +17,12 @@ import RecordExtractionFailureReducer from "../record_extraction_failure_reducer
 import RecordInboundReducer from "../record_inbound_reducer";
 import RecordSentQuestionReducer from "../record_sent_question_reducer";
 import RecordSharedLocationReducer from "../record_shared_location_reducer";
+import ReleaseConversationReducer from "../release_conversation_reducer";
 import ResetDemoReducer from "../reset_demo_reducer";
 import ResolveIncidentReducer from "../resolve_incident_reducer";
 import RevokeRoleReducer from "../revoke_role_reducer";
+import SendDispatcherMessageReducer from "../send_dispatcher_message_reducer";
+import TakeOverConversationReducer from "../take_over_conversation_reducer";
 
 export type AckNotificationParams = __Infer<typeof AckNotificationReducer>;
 export type AdvanceAssignmentParams = __Infer<typeof AdvanceAssignmentReducer>;
@@ -32,7 +35,10 @@ export type RecordExtractionFailureParams = __Infer<typeof RecordExtractionFailu
 export type RecordInboundParams = __Infer<typeof RecordInboundReducer>;
 export type RecordSentQuestionParams = __Infer<typeof RecordSentQuestionReducer>;
 export type RecordSharedLocationParams = __Infer<typeof RecordSharedLocationReducer>;
+export type ReleaseConversationParams = __Infer<typeof ReleaseConversationReducer>;
 export type ResetDemoParams = __Infer<typeof ResetDemoReducer>;
 export type ResolveIncidentParams = __Infer<typeof ResolveIncidentReducer>;
 export type RevokeRoleParams = __Infer<typeof RevokeRoleReducer>;
+export type SendDispatcherMessageParams = __Infer<typeof SendDispatcherMessageReducer>;
+export type TakeOverConversationParams = __Infer<typeof TakeOverConversationReducer>;
 

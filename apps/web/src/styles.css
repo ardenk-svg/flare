@@ -375,3 +375,7 @@ button { font: inherit; }
   .ihead-elapsed { margin-left: 0; }
   .stepper li { font-size: 11px; }
 }
+/* Human dispatcher controls in the caller thread. */
+.dispatcher-compose { display: grid; gap: 10px; margin-top: 16px; }
+.dispatcher-compose textarea { width: 100%; resize: vertical; font: inherit; padding: 10px; border: 1px solid var(--line, #d0d5dd); border-radius: 8px; background: inherit; color: inherit; }
+.dispatcher-compose .btn { justify-self: start; }

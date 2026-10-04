@@ -1,10 +1,10 @@
 import { ConversationQueue } from "./conversation-queue.js";
 import {
-  normalizeInboundMessage,
   type SpectrumMessageEnvelope,
   type SpectrumSpaceEnvelope,
 } from "./normalize.js";
-import type { InboundMessageHandler } from "./types.js";
+import { normalizeInboundEvent } from "./location.js";
+import type { InboundMessageHandler, ReplyPort, SharedLocationHandler } from "./types.js";
 
 interface SendableSpectrumSpace extends SpectrumSpaceEnvelope {
   send(content: string): Promise<unknown>;
@@ -29,32 +29,49 @@ export async function runMessageLoop(
   app: SpectrumAppEnvelope,
   handler: InboundMessageHandler,
   logger: AgentLogger = console,
+  options: {
+    handleLocation?: SharedLocationHandler;
+    handleUnsupported?: InboundMessageHandler;
+    handleLocationShare?: InboundMessageHandler;
+    observe?: (space: SpectrumSpaceEnvelope, message: SpectrumMessageEnvelope) => void;
+    afterHandled?: (space: SpectrumSpaceEnvelope, message: SpectrumMessageEnvelope) => void;
+  } = {},
 ): Promise<void> {
   const queue = new ConversationQueue();
   const pending = new Set<Promise<void>>();
 
-  logger.info("Flare agent is listening for inbound text messages.");
+  logger.info("Flare agent is listening for inbound messages and shared locations.");
 
   for await (const [space, sourceMessage] of app.messages) {
-    let message;
+    let event;
     try {
-      message = normalizeInboundMessage(space, sourceMessage);
+      event = await normalizeInboundEvent(space, sourceMessage);
+      if (event) options.observe?.(space, sourceMessage);
     } catch (error) {
       logger.error(`Rejected malformed Spectrum envelope: ${describeError(error)}`);
       continue;
     }
 
-    if (message === null) {
+    if (event === null) {
       continue;
     }
+    if (event.kind === "unsupported" || event.kind === "location-share") {
+      logger.info(`Inbound content ${sourceMessage.content.type}: ${event.kind === "location-share" ? "Find My card without embedded coordinates" : "no supported text or location"}.`);
+    }
 
+    const { message } = event;
     const job = queue
       .run(message.conversationKey, async () => {
-        await handler(message, {
+        const reply: ReplyPort = {
           send: async (text) => {
             await space.send(text);
           },
-        });
+        };
+        if (event.kind === "location") await options.handleLocation?.(event.message);
+        else if (event.kind === "location-share") await options.handleLocationShare?.(event.message, reply);
+        else if (event.kind === "unsupported") await options.handleUnsupported?.(event.message, reply);
+        else await handler(event.message, reply);
+        options.afterHandled?.(space, sourceMessage);
       })
       .catch((error: unknown) => {
         // Do not log caller text, routing identifiers, or credentials.
