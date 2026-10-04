@@ -18,6 +18,8 @@ const ICONS = {
   fire: <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" />,
   ems: <path d="M11 2a2 2 0 0 0-2 2v5H4a2 2 0 0 0-2 2v2c0 1.1.9 2 2 2h5v5c0 1.1.9 2 2 2h2a2 2 0 0 0 2-2v-5h5a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2h-5V4a2 2 0 0 0-2-2h-2z" />,
   wifiOff: <><path d="M12 20h.01" /><path d="M8.5 16.43a5 5 0 0 1 7 0" /><path d="M2 8.82a15 15 0 0 1 4.17-2.65" /><path d="M10.66 5c4.01-.36 8.14.9 11.34 3.76" /><path d="M16.85 11.25a10 10 0 0 1 2.22 1.68" /><path d="M5 13a10 10 0 0 1 5.24-2.76" /><path d="m2 2 20 20" /></>,
+  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2" /><path d="M12 20v2" /><path d="m4.93 4.93 1.41 1.41" /><path d="m17.66 17.66 1.41 1.41" /><path d="M2 12h2" /><path d="M20 12h2" /><path d="m6.34 17.66-1.41 1.41" /><path d="m19.07 4.93-1.41 1.41" /></>,
+  moon: <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />,
 } as const;
 export function Icon({ name }: { name: keyof typeof ICONS }) {
   return <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">{ICONS[name]}</svg>;
@@ -125,6 +127,37 @@ export function IdentityBadge() {
     <span className="chip plain ident" title="Backend permissions come from the authorized identity, not this label">
       {label}{mode === "fixture" ? " (fixture)" : ""}
     </span>
+  );
+}
+
+// ---- Theme ----
+// index.html applies a saved choice before first paint; without one, the page follows the OS setting.
+const THEME_KEY = "flare-theme";
+type Theme = "light" | "dark";
+const systemTheme = (): Theme => (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+const savedTheme = (): Theme | null => {
+  try { const t = localStorage.getItem(THEME_KEY); return t === "light" || t === "dark" ? t : null; } catch { return null; }
+};
+
+export function ThemeToggle() {
+  const [theme, setTheme] = useState<Theme>(() => savedTheme() ?? systemTheme());
+  // Follow OS changes until the viewer picks a theme themselves.
+  useEffect(() => {
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => { if (!savedTheme()) setTheme(systemTheme()); };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  const next: Theme = theme === "dark" ? "light" : "dark";
+  return (
+    <button className="btn small-btn theme-toggle" aria-label={`Switch to ${next} mode`} title={`Switch to ${next} mode`}
+      onClick={() => {
+        document.documentElement.dataset.theme = next;
+        try { localStorage.setItem(THEME_KEY, next); } catch { /* applies for this page load only */ }
+        setTheme(next);
+      }}>
+      <Icon name={theme === "dark" ? "sun" : "moon"} />
+    </button>
   );
 }
 

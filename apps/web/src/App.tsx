@@ -2,7 +2,7 @@ import { useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import Dispatcher from "./routes/Dispatcher";
 import Responder from "./routes/Responder";
-import { AccessGate, ConnectionStatus, Icon, IdentityBadge, SimBanner } from "./components";
+import { AccessGate, ConnectionStatus, Icon, IdentityBadge, SimBanner, ThemeToggle } from "./components";
 import { useSnapshot } from "./data";
 
 // Seeded by the SpacetimeDB module's init; used until the backend's unit list arrives (or if this identity can't read it).
@@ -58,6 +58,7 @@ function TopBar() {
           <RestartDemo />
           <IdentityBadge />
           <ConnectionStatus />
+          <ThemeToggle />
         </div>
       </div>
     </header>
