@@ -9,7 +9,7 @@
 - Optional Find My binds one direct caller and conversation on a single line. It reloads that caller's snapshot, watches only that address, rejects missing/invalid coordinates, and stops applying updates across case boundaries until an explicit new request. The installed Spectrum native-client escape hatch is isolated and capability-checked in `find-my.ts`.
 - REPORT/CORRECTION applies deterministic recommendations with expected-revision checks and bounded stale-result retry.
 - Obvious status questions bypass Gemini, read committed incident/assignment state, and enqueue a no-patch informational notification. OTHER is completed without creating an incident.
-- Extraction failures stay retryable and preserve verified facts. Pending intake is retried once at agent startup.
+- Extraction failures preserve verified facts. Pending intake is retried at startup and while running with bounded backoff; interrupted/failed clarifications recover without reapplying facts.
 - Clarifications are sent one at a time and their delivery outcome is persisted.
 - Pending/failed notification jobs drain at startup and while running. Successful external sends are acknowledged; failures use bounded exponential retry and sanitized errors.
 - Spacetime identity token and Spectrum route data persist in ignored `.flare/agent-state.json` (mode `0600`) so the same worker host can reconnect and reopen an iMessage space after restart. Cloud routes include the line phone discriminator required by multi-line Spectrum projects.
@@ -54,6 +54,8 @@ The root `.env` is optional when values are exported by the process. It is ignor
 | `FLARE_SPACETIME_BIN` | optional | CLI executable path for the local demo runner; otherwise uses PATH |
 | `FLARE_NOTIFICATION_POLL_MS` | optional | Poll interval, default 2000 ms |
 | `FLARE_NOTIFICATION_MAX_ATTEMPTS` | optional | External delivery attempt ceiling, default 5 |
+| `FLARE_LOCATION_TIMEOUT_MS` | optional | Location/attachment deadline, default 5000 ms |
+| `FLARE_INTAKE_RETRY_POLL_MS` | optional | Intake and clarification recovery poll, default 5000 ms |
 | `FLARE_FIND_MY_ENABLED` | optional | One-phone Find My enabled by default; set `0` to disable; pins always work |
 | `FLARE_DEMO_PHONE` | optional | E.164 caller allowlist; otherwise binds first direct caller |
 
@@ -79,6 +81,14 @@ The focused agent tests cover normalization and line routing, per-conversation s
 3. Run a real iMessage report/correction, dispatch and EN_ROUTE update, status inquiry, restart drain, resolve, and a clean second case in the same thread.
 
 External delivery is at-least-once around a crash: a crash after Spectrum accepts a send but before SpacetimeDB records its acknowledgment can produce a duplicate. The worker prevents duplicate sends after a successful acknowledgment within one process, but it does not claim exactly-once delivery.
+
+## Demo message recovery (2026-10-04)
+
+The saved local demo contained applied intake with no recorded clarification. The normal processing path awaited an unbounded Find My lookup before sending that question, blocking later messages in the same conversation. Provider reads, requests, attachment reads and stream shutdown now have deadlines. A failed initial snapshot still opens the location feed, feed failures reconnect automatically, and an explicit new Find My card rebinds the current demo case. Timed-out results are never applied.
+
+Recovery runs alongside message listening, serializes with caller turns, retries failed translation/extraction or clarification with backoff (five attempts per unchanged context), and resumes an applied case with no delivered question. New input resets the retry budget; completed intake and human-controlled/ended cases receive no automated recovery question. Safe logs expose received/processed stages, successful fact commits, and provider failures. No model, schema, or shared deployment was changed.
+
+Verification: root check passed 117 tests, workspace/script typechecks and production build. Isolated fixture `e2e:auto` passed the full worker/database loop, pin handling, dispatcher/responder takeover, all services, worker restart and repeated demos. Live Gemini smoke and English/Spanish translations passed with the unchanged configured model. The full live loop reached repeated rehearsals but failed its 45-second wait during repeated HTTP 429 quota errors; an earlier rate-limited turn successfully recovered in the same run. This confirms recovery while leaving external quota availability as a limit. Tests used synthetic inputs and fake phone transport; no real phone test message was sent. Local saved demo data was retained.
 
 ## Issue #31 verification on 2026-10-04
 

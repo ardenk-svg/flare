@@ -113,6 +113,7 @@ class FakeData implements AgentDataPort {
     error?: string;
   }): Promise<void> {
     this.questions.push(input);
+    this.current = { ...this.current, lastQuestion: input.question, lastQuestionDelivery: input.delivered ? "SENT" : "FAILED" };
   }
   listAssignments(): Assignment[] {
     return this.assignments;
@@ -120,6 +121,7 @@ class FakeData implements AgentDataPort {
   listPendingConversationKeys(): string[] {
     return this.current.pendingMessages.length ? [this.current.conversationKey] : [];
   }
+  listConversationKeys(): string[] { return [this.current.conversationKey]; }
   listPendingNotifications(): PendingNotification[] {
     return [];
   }
@@ -557,4 +559,143 @@ test("Spanish caller input stays original for evidence and the question is sent 
   assert.deepEqual(sent, ['[SIMULATION] ¿Hay alguien herido?']);
   assert.equal(data.questions[0]?.question, '[SIMULATION] Is anyone injured?');
   assert.equal(data.questions[0]?.language, 'es');
+});
+
+const inbound = { providerMessageId: "m-1", conversationKey: "imessage:chat-1", platform: "imessage", senderId: "caller",
+  text: message.text, receivedAt: message.receivedAt, route: { platform: "imessage", spaceId: "chat-1" } };
+const recommendation = () => ({ services: ["FIRE"] as Array<"FIRE">, ruleIds: ["DEMO_FIRE"], reason: "Smoke" });
+const quiet = { info: () => {}, error: () => {} };
+
+test("a stalled Find My lookup cannot block the clarification or a later pin", async () => {
+  const data = new FakeData();
+  const sent: string[] = [];
+  const orchestrator = new AgentOrchestrator({ data, state: await state(), logger: quiet,
+    sendRoute: async (_route, text) => { sent.push(text); },
+    locationTimeoutMs: 5, lookupSharedLocation: () => new Promise(() => {}),
+    extractTurn: async () => ({ ok: true, result: reportResult }), recommendServices: recommendation });
+  await orchestrator.handleInbound(inbound, { send: async text => { sent.push(text); } });
+  await orchestrator.handleLocation({ ...inbound, providerMessageId: "later-pin", latitude: 0, longitude: 0, source: "IMESSAGE_PIN" });
+  assert.equal(data.applied.length, 1);
+  assert.equal(sent[0], "[SIMULATION] Which building and entrance?");
+  assert.equal(data.locations[0]?.messageId, "later-pin");
+});
+
+test("a stalled Find My card gets a fallback and leaves subsequent text processable", async () => {
+  const data = new FakeData();
+  const orchestrator = new AgentOrchestrator({ data, state: await state(), logger: quiet, sendRoute: async () => {},
+    locationTimeoutMs: 5, lookupSharedLocation: () => new Promise(() => {}),
+    extractTurn: async () => ({ ok: true, result: reportResult }), recommendServices: recommendation });
+  await orchestrator.handleLocationShare(inbound, { send: async () => {} });
+  assert.match(data.completed[0]?.replyText ?? "", /Find My sharing card/);
+  data.current.pendingMessages = [{ ...message, id: "later" }];
+  await orchestrator.handleInbound({ ...inbound, providerMessageId: "later" }, { send: async () => {} });
+  assert.equal(data.applied.length, 1);
+});
+
+test("translation recovers during the same run with original evidence and a Spanish reply", async () => {
+  const data = new FakeData();
+  data.current.pendingMessages = [{ ...message, text: "Hay humo." }];
+  let now = 0;
+  let translations = 0;
+  let extractedText: string | undefined;
+  const sent: string[] = [];
+  const orchestrator = new AgentOrchestrator({ data, state: await state(), logger: quiet,
+    now: () => now, retryBaseMs: 10, sendRoute: async (_route, text) => { sent.push(text); },
+    translateText: async request => {
+      if (++translations === 1) throw new Error("Temporary translation failure");
+      return { text: request.targetLanguage === "en" ? "There is smoke." : "[SIMULATION] ¿Dónde está ocurriendo?", sourceLanguage: request.targetLanguage === "en" ? "es" : "en", targetLanguage: request.targetLanguage };
+    },
+    extractTurn: async turn => { extractedText = turn.messages[0]?.text; return { ok: true, result: reportResult }; },
+    recommendServices: recommendation });
+  await orchestrator.handleInbound({ ...inbound, text: "Hay humo." }, { send: async () => { throw new Error("The retry uses the saved route"); } });
+  assert.equal(data.current.pendingMessages.length, 1);
+  assert.equal(data.applied.length, 0);
+  await orchestrator.drainPendingIntake();
+  assert.equal(translations, 1);
+  now = 10;
+  await orchestrator.drainPendingIntake();
+  assert.equal(extractedText, "Hay humo.");
+  assert.equal(data.translations.get("m-1")?.translatedText, "There is smoke.");
+  assert.deepEqual(sent, ["[SIMULATION] ¿Dónde está ocurriendo?"]);
+  await orchestrator.drainPendingIntake();
+  assert.equal(sent.length, 1);
+});
+
+test("provider failures back off, stop at five attempts, and reset for new input", async () => {
+  const data = new FakeData();
+  let now = 0;
+  let calls = 0;
+  const orchestrator = new AgentOrchestrator({ data, state: await state(), logger: quiet,
+    now: () => now, retryBaseMs: 10, sendRoute: async () => {},
+    extractTurn: async () => { calls++; return { ok: false, error: { code: "RATE_LIMIT", message: "Quota temporarily exceeded", retryable: true } }; },
+    recommendServices: recommendation });
+  await orchestrator.drainPendingIntake();
+  await orchestrator.drainPendingIntake();
+  assert.equal(calls, 1);
+  for (const elapsed of [10, 20, 40, 80]) { now += elapsed; await orchestrator.drainPendingIntake(); }
+  assert.equal(calls, 5);
+  now += 1_000_000;
+  await orchestrator.drainPendingIntake();
+  assert.equal(calls, 5);
+  assert.equal(data.current.pendingMessages.length, 1);
+  data.current.pendingMessages.push({ ...message, id: "new-input" });
+  await orchestrator.drainPendingIntake();
+  assert.equal(calls, 6);
+});
+
+test("recovery sends an interrupted or failed clarification once without extracting again", async () => {
+  for (const delivery of [null, "FAILED"] as const) {
+    const data = new FakeData();
+    data.current = context({ activeIncident: incident(), pendingMessages: [], lastQuestionDelivery: delivery });
+    const sent: string[] = [];
+    const orchestrator = new AgentOrchestrator({ data, state: await state(), logger: quiet,
+      sendRoute: async (_route, text) => { sent.push(text); },
+      extractTurn: async () => { throw new Error("Already applied input must not be re-extracted"); }, recommendServices: recommendation });
+    await orchestrator.drainPendingIntake();
+    await orchestrator.drainPendingIntake();
+    assert.deepEqual(sent, ["[SIMULATION] What is the address or location where this is happening?"]);
+    assert.equal(data.current.lastQuestionDelivery, "SENT");
+  }
+});
+
+test("a failed clarification retries without reapplying facts and respects takeover", async () => {
+  const data = new FakeData();
+  data.current.activeIncident = incident();
+  let now = 0;
+  const sent: string[] = [];
+  const orchestrator = new AgentOrchestrator({ data, state: await state(), logger: quiet,
+    now: () => now, retryBaseMs: 10, sendRoute: async (_route, text) => { sent.push(text); },
+    extractTurn: async () => ({ ok: true, result: reportResult }), recommendServices: recommendation });
+  await orchestrator.handleInbound(inbound, { send: async () => { throw new Error("Temporary send failure"); } });
+  await orchestrator.drainPendingIntake();
+  assert.equal(sent.length, 0);
+  data.current.dispatcherIdentity = "human";
+  now = 10;
+  await orchestrator.drainPendingIntake();
+  assert.equal(sent.length, 0);
+  data.current.dispatcherIdentity = undefined;
+  await orchestrator.drainPendingIntake();
+  await orchestrator.drainPendingIntake();
+  assert.equal(data.applied.length, 1);
+  assert.equal(sent.length, 1);
+});
+
+test("recovery leaves delivered, completed, and human-controlled cases alone", async () => {
+  const complete = { ...emptyFacts(), incidentType: "smoke", fireOrSmoke: true, locationText: "Demo library", peopleInvolved: 1, injuryReported: false, trappedPerson: false };
+  for (const overrides of [
+    { lastQuestionDelivery: "SENT" as const },
+    { dispatcherIdentity: "human" },
+    { activeIncident: incident({ status: "RESOLVED" }) },
+    { activeIncident: incident({ status: "CLOSED" }) },
+    { currentFacts: complete, activeIncident: incident({ facts: complete }) },
+  ]) {
+    const data = new FakeData();
+    data.current = context({ activeIncident: incident(), pendingMessages: [], ...overrides });
+    const orchestrator = new AgentOrchestrator({ data, state: await state(), logger: quiet,
+      sendRoute: async () => { throw new Error("No reply expected"); },
+      extractTurn: async () => { throw new Error("No extraction expected"); }, recommendServices: recommendation });
+    await orchestrator.drainPendingIntake();
+    assert.equal(data.questions.length, 0);
+    assert.equal(data.failures.length, 0);
+  }
 });

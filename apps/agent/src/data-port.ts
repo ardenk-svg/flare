@@ -80,6 +80,8 @@ export interface AgentDataPort {
   }): Promise<void>;
   listAssignments(): Assignment[];
   listPendingConversationKeys(): string[];
+  /** Includes active cases whose extraction committed but clarification was interrupted. */
+  listConversationKeys?(): string[];
   listPendingNotifications(): PendingNotification[];
   subscribeNotifications(callback: (job: PendingNotification) => void): () => void;
   ackNotification(input: {
@@ -103,6 +105,7 @@ export function createAgentDataPort(connection: FlareConnection): AgentDataPort 
     completeInboundWithoutPatch: (input) => completeInboundWithoutPatch(conn, input),
     recordSentQuestion: (input) => recordSentQuestion(conn, input),
     listAssignments: () => listAssignments(conn),
+    listConversationKeys: () => [...conn.db.agentConversation.iter()].map(row => row.conversationKey),
     listPendingConversationKeys: () => {
       const keys: string[] = [];
       for (const row of conn.db.agentConversation.iter()) {
