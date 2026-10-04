@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-  emptyFacts,
+  emptyFacts, mergeFacts,
   type Assignment,
   type ConversationContext,
   type ExtractionOutcome,
@@ -71,6 +71,10 @@ function context(overrides: Partial<ConversationContext> = {}): ConversationCont
 }
 
 class FakeData implements AgentDataPort {
+  translations = new Map<string, { language: string; translatedText: string }>();
+  getInboundTranslation(_key: string, id: string) { return this.translations.get(id) ?? null; }
+  async recordInboundTranslation(input: { messageId: string; language: string; translatedText: string }) { this.translations.set(input.messageId, input); this.current.callerLanguage = input.language; }
+  async prepareNotificationTranslation() {}
   locations: Array<Parameters<AgentDataPort["recordSharedLocation"]>[0]> = [];
   async recordSharedLocation(input: Parameters<AgentDataPort["recordSharedLocation"]>[0]): Promise<void> { this.locations.push(input); }
   current = context();
@@ -78,7 +82,7 @@ class FakeData implements AgentDataPort {
   failures: ExtractionFailure[] = [];
   applied: Array<{ result: ExtractionResult; recommendation: Recommendation }> = [];
   completed: Array<{ intent: "STATUS_QUERY" | "OTHER"; replyText?: string }> = [];
-  questions: Array<{ question: string; delivered: boolean; error?: string }> = [];
+  questions: Array<{ question: string; delivered: boolean; error?: string; translatedText?: string; language?: string }> = [];
 
   async recordInbound(): Promise<ConversationContext> {
     return this.current;
@@ -136,8 +140,9 @@ const reportResult: ExtractionResult = {
   summary: "Caller reports smoke.",
   evidence: [{ field: "fireOrSmoke", messageId: "m-1", quote: "smoke" }],
   corrections: [],
-  unresolvedFields: ["locationText"],
+  unresolvedFields: [],
   proposedQuestion: "Which building and entrance?",
+  questionField: "locationText",
 };
 
 test("applies a report, calculates recommendations, and records its delivered question", async () => {
@@ -182,11 +187,11 @@ test("applies a report, calculates recommendations, and records its delivered qu
   assert.equal(receivedTurn?.lastQuestion, null);
   assert.equal(data.applied.length, 1);
   assert.deepEqual(data.applied[0]?.recommendation.services, ["FIRE"]);
-  assert.deepEqual(sent, ["Which building and entrance?"]);
+  assert.deepEqual(sent, ["[SIMULATION] Which building and entrance?"]);
   assert.deepEqual(data.questions, [
     {
       conversationKey: "imessage:chat-1",
-      question: "Which building and entrance?",
+      question: "[SIMULATION] Which building and entrance?",
       delivered: true,
     },
   ]);
@@ -412,7 +417,8 @@ test("shared-location transcript markers stay outside model context and suppress
   await orchestrator.handleInbound(inbound, { send: async text => { sent.push(text); } });
   assert.deepEqual(turn?.recentMessages, [message]);
   assert.equal(turn?.hasSharedLocation, true);
-  assert.deepEqual(sent, []);
+  assert.equal(sent.length, 1);
+  assert.doesNotMatch(sent[0]!, /address|location|building|entrance/i);
 });
 
 test("an existing Find My share is committed before asking the first report's location question", async () => {
@@ -435,8 +441,8 @@ test("an existing Find My share is committed before asking the first report's lo
   await orchestrator.handleInbound({ providerMessageId: "m-1", conversationKey: "imessage:chat-1", platform: "imessage", senderId: "caller",
     text: message.text, receivedAt: message.receivedAt, route: { platform: "imessage", spaceId: "chat-1" } }, { send: async text => { sent.push(text); } });
   assert.equal(data.locations[0]!.messageId, "findmy-context-m-1");
-  assert.deepEqual(sent, []);
-  assert.deepEqual(data.questions, []);
+  assert.equal(sent.length, 1);
+  assert.doesNotMatch(sent[0]!, /address|location|building|entrance/i);
 });
 
 test("attachment fallback and explicit location request use durable informational replies without Gemini", async () => {
@@ -508,4 +514,47 @@ test("a Find My card with coordinates records the original provider message dire
   assert.equal(data.locations[0]!.messageId, "findmy-card");
   assert.equal(data.locations[0]!.source, "FIND_MY");
   assert.equal(data.completed.length, 0);
+});
+
+
+test("intake keeps asking until relevant facts are addressed, then stops even if Gemini suggests another question", async () => {
+  const data = new FakeData();
+  const facts = { ...emptyFacts(), incidentType: 'smoke', locationText: 'Demo library', fireOrSmoke: true, peopleInvolved: 1 };
+  data.current = context({ currentFacts: facts, activeIncident: incident({ facts }) });
+  data.applyIntakePatch = async input => {
+    data.applied.push(input);
+    const facts = mergeFacts(data.current.currentFacts, input.result.patch);
+    data.current = { ...data.current, pendingMessages: [], currentFacts: facts, activeIncident: incident({ facts, unresolvedFields: [...(data.current.activeIncident?.unresolvedFields ?? []), ...input.result.unresolvedFields] }) };
+  };
+  let result: ExtractionResult = { ...reportResult, patch: {}, proposedQuestion: null };
+  const sent: string[] = [];
+  const orchestrator = new AgentOrchestrator({ data, state: await state(), sendRoute: async (_route, text) => { sent.push(text); }, extractTurn: async () => ({ ok: true, result }), recommendServices: () => ({ services: ['FIRE'], ruleIds: [], reason: 'Smoke' }) });
+  const inbound = { providerMessageId: 'm-1', conversationKey: 'imessage:chat-1', platform: 'imessage', senderId: 'caller', text: message.text, receivedAt: message.receivedAt, route: { platform: 'imessage', spaceId: 'chat-1' } };
+  await orchestrator.handleInbound(inbound, { send: async text => { sent.push(text); } });
+  assert.deepEqual(sent, ['[SIMULATION] Is anyone trapped?']);
+  data.current.pendingMessages = [{ ...message, id: 'm-2', text: "I don't know if anyone is trapped." }];
+  result = { ...result, unresolvedFields: ['trappedPerson'] };
+  await orchestrator.handleInbound({ ...inbound, providerMessageId: 'm-2' }, { send: async text => { sent.push(text); } });
+  assert.equal(sent.at(-1), '[SIMULATION] Is anyone injured?');
+  data.current.pendingMessages = [{ ...message, id: 'm-3', text: 'Nobody is injured.' }];
+  result = { ...result, patch: { injuryReported: false }, unresolvedFields: [], proposedQuestion: 'Is anyone trapped?', questionField: 'trappedPerson' };
+  await orchestrator.handleInbound({ ...inbound, providerMessageId: 'm-3' }, { send: async text => { sent.push(text); } });
+  assert.equal(sent.length, 2);
+  assert.equal(data.current.currentFacts.injuryReported, false);
+});
+
+test("Spanish caller input stays original for evidence and the question is sent in Spanish", async () => {
+  const data = new FakeData();
+  data.current = context({ currentFacts: { ...emptyFacts(), incidentType: 'smoke', locationText: 'Biblioteca', fireOrSmoke: true, trappedPerson: false, peopleInvolved: 1 }, pendingMessages: [{ ...message, text: 'Hay humo en la biblioteca.' }] });
+  let input: InboundTurn | undefined;
+  const sent: string[] = [];
+  const orchestrator = new AgentOrchestrator({ data, state: await state(), sendRoute: async () => {},
+    translateText: async request => ({ sourceLanguage: request.targetLanguage === 'en' ? 'es' : 'en', targetLanguage: request.targetLanguage, text: request.targetLanguage === 'en' ? 'There is smoke in the library.' : '[SIMULATION] ¿Hay alguien herido?' }),
+    extractTurn: async turn => { input = turn; return { ok: true, result: { ...reportResult, patch: {}, proposedQuestion: 'Is anyone injured?', questionField: 'injuryReported' } }; }, recommendServices: () => ({ services: ['FIRE'], ruleIds: [], reason: 'Smoke' }) });
+  await orchestrator.handleInbound({ providerMessageId: 'm-1', conversationKey: 'imessage:chat-1', platform: 'imessage', senderId: 'caller', text: 'Hay humo en la biblioteca.', receivedAt: message.receivedAt, route: { platform: 'imessage', spaceId: 'chat-1' } }, { send: async text => { sent.push(text); } });
+  assert.equal(input?.messages[0]?.text, 'Hay humo en la biblioteca.');
+  assert.equal(data.translations.get('m-1')?.translatedText, 'There is smoke in the library.');
+  assert.deepEqual(sent, ['[SIMULATION] ¿Hay alguien herido?']);
+  assert.equal(data.questions[0]?.question, '[SIMULATION] Is anyone injured?');
+  assert.equal(data.questions[0]?.language, 'es');
 });

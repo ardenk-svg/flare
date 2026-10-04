@@ -94,6 +94,7 @@ export interface CallerMessage {
 export interface InboundTurn {
   /** Trusted provider location exists; no coordinates or attachment are sent to the model. */
   hasSharedLocation?: boolean;
+  addressedFields?: CallerFactField[];
   conversationKey: string; // trusted internal routing key
   intakeRevision: number;
   messages: CallerMessage[]; // new ordered caller messages
@@ -117,6 +118,7 @@ export interface ExtractionResult {
   corrections: CallerFactField[];
   unresolvedFields: CallerFactField[];
   proposedQuestion: string | null;
+  questionField?: CallerFactField | null;
 }
 
 export interface Recommendation {
@@ -151,7 +153,7 @@ export type IncidentStatus = "COLLECTING" | "READY_FOR_REVIEW" | "DISPATCHED" | 
 export type AssignmentStatus = "OFFERED" | "ACCEPTED" | "EN_ROUTE" | "ON_SCENE" | "COMPLETED";
 export type UnitStatus = "AVAILABLE" | "BUSY";
 export type InboundStatus = "RECEIVED" | "APPLIED";
-export type NotificationKind = "DISPATCH_CONFIRMED" | "ASSIGNMENT_EN_ROUTE" | "INFO_REPLY" | "DISPATCHER_REPLY";
+export type NotificationKind = "DISPATCH_CONFIRMED" | "ASSIGNMENT_EN_ROUTE" | "INFO_REPLY" | "DISPATCHER_REPLY" | "RESPONDER_REPLY";
 export type NotificationStatus = "PENDING" | "SENT" | "FAILED";
 export type QuestionDelivery = "SENT" | "FAILED";
 export type Role = "ADMIN" | "AGENT" | "DISPATCHER" | "RESPONDER";
@@ -225,11 +227,13 @@ export interface SharedLocation {
   sharedAt: string;
 }
 
-/** One line of the dispatcher's caller transcript for an incident's case. */
+/** One line of an authorized operator's caller transcript for an incident's case. */
 export interface ConversationMessage {
+  translatedText?: string | null;
+  language?: string | null;
   key: string;
   incidentId: string;
-  sender: "CALLER" | "AGENT" | "DISPATCHER";
+  sender: "CALLER" | "AGENT" | "DISPATCHER" | "RESPONDER";
   text: string;
   at: string;
   /** Outbound AGENT or DISPATCHER rows only. */
@@ -237,6 +241,8 @@ export interface ConversationMessage {
 }
 
 export type IncidentEventKind =
+  | "RESPONDER_TAKEOVER"
+  | "DEMO_RESTARTED"
   | "DISPATCHER_TAKEOVER"
   | "AGENT_RESUMED"
   | "INCIDENT_CREATED"
@@ -284,7 +290,8 @@ export interface Assignment {
 }
 
 export interface ConversationContext {
-  /** Present while a human dispatcher owns the active caller conversation. */
+  callerLanguage?: string;
+  /** Present while a human operator owns the active caller conversation. */
   dispatcherIdentity?: string | null;
   conversationKey: string;
   route: ConversationRoute;
@@ -305,6 +312,9 @@ export interface ConversationContext {
 }
 
 export interface PendingNotification {
+  callerLanguage?: string;
+  translatedText?: string;
+  translationLanguage?: string;
   id: string;
   conversationKey: string;
   route: ConversationRoute;
@@ -319,3 +329,46 @@ export interface PendingNotification {
   attempts: number;
   lastError: string | null;
 }
+
+
+export type IntakeCategory = "violent" | "fire" | "medical" | "traffic" | "other";
+export function intakeCategory(f: CallerFacts): IntakeCategory {
+  const type = f.incidentType?.toLowerCase() ?? "";
+  if (/crash|collision|accident|vehicle|\bcars?\b|truck|traffic|hit and run|motorcycle/.test(type)) return "traffic";
+  if (/fire|smoke|burn|flame|explosion|gas leak/.test(type)) return "fire";
+  if (/robb|assault|fight|weapon|gun|knife|stab|shoot|threat|attack|break.?in|burglar|theft|steal|mug/.test(type)) return "violent";
+  if (/medical|collapse|unconscious|breath|seizure|heart|chest|overdose|bleed|injur|fell|fall|sick|allerg|faint/.test(type)) return "medical";
+  if (f.fireOrSmoke) return "fire";
+  if (f.violentThreat) return "violent";
+  if (f.callerReportedBreathing === false || f.callerReportedConscious === false || f.injuryReported) return "medical";
+  return "other";
+}
+const RELEVANT: Record<IntakeCategory, CallerFactField[]> = {
+  violent: ["weaponPresent", "suspectCount", "injuryReported", "callerStatus", "peopleInvolved"],
+  fire: ["trappedPerson", "fireOrSmoke", "injuryReported", "peopleInvolved"],
+  medical: ["callerReportedConscious", "callerReportedBreathing", "patientAge", "injuryReported"],
+  traffic: ["injuryReported", "vehicleCount", "trappedPerson", "fireOrSmoke", "roadBlocked"],
+  other: ["injuryReported", "violentThreat", "fireOrSmoke", "peopleInvolved"],
+};
+/** Unknown answers stay unknown, but count as addressed so intake does not loop forever. */
+export function missingIntakeFields(f: CallerFacts, hasPin = false, addressed: readonly CallerFactField[] = []): CallerFactField[] {
+  return ([...(!hasPin ? ["locationText" as const] : []), "incidentType", ...RELEVANT[intakeCategory(f)]] as CallerFactField[])
+    .filter(k => (f[k] === null || f[k] === "") && !addressed.includes(k));
+}
+export const INTAKE_QUESTIONS: Record<CallerFactField, string> = {
+  incidentType: "What is happening?",
+  locationText: "What is the address or location where this is happening?",
+  peopleInvolved: "How many people are involved?",
+  callerReportedConscious: "Is the person conscious?",
+  callerReportedBreathing: "Is the person breathing?",
+  fireOrSmoke: "Is there fire or smoke?",
+  trappedPerson: "Is anyone trapped?",
+  violentThreat: "Is there a violent threat?",
+  injuryReported: "Is anyone injured?",
+  weaponPresent: "Is a weapon present?",
+  suspectCount: "How many suspects are there?",
+  callerStatus: "Can you describe your current situation?",
+  vehicleCount: "How many vehicles are involved?",
+  patientAge: "What is the person's approximate age?",
+  roadBlocked: "Is the road blocked?",
+};

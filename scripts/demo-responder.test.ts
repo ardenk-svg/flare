@@ -20,3 +20,20 @@ test("the temporary demo bridge grants selected seeded units and rejects unrelat
   } finally { await bridge.close(); }
   await assert.rejects(fetch(url));
 });
+
+
+test("demo restart requires the capability, origin and dispatcher authorization callback", async () => {
+  let restarts = 0;
+  const dispatcher = 'd'.repeat(64);
+  const bridge = await startDemoResponderServer({ key: 'restart-key', origin: 'http://localhost:5173', authorize() {}, restart(identity) { if (identity !== dispatcher) throw new Error('Not dispatcher'); restarts++; } });
+  const url = `http://127.0.0.1:${bridge.port}/__flare_demo/restart`;
+  const request = (identity: string, key = 'restart-key') => fetch(url, { method: 'POST', headers: { Origin: 'http://localhost:5173', 'X-Flare-Demo-Key': key }, body: JSON.stringify({ identity }) });
+  try {
+    assert.equal((await request(dispatcher, 'wrong')).status, 403);
+    assert.equal((await request('a'.repeat(64))).status, 403);
+    assert.equal(restarts, 0);
+    assert.equal((await request(dispatcher)).status, 204);
+    assert.equal((await request(dispatcher)).status, 204);
+    assert.equal(restarts, 2);
+  } finally { await bridge.close(); }
+});

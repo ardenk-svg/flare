@@ -1,4 +1,4 @@
-import { extractTurn, recommendServices } from "@flare/intake";
+import { extractTurn, recommendServices, translateText, type TranslateText } from "@flare/intake";
 import type { ExtractTurn, RecommendServices } from "@flare/contracts";
 import { connectFlare, getMyRole } from "@flare/data";
 
@@ -53,7 +53,7 @@ export async function runEchoAgent(app: StoppableSpectrumApp): Promise<void> {
 export async function runAgent(
   app: StoppableSpectrumApp,
   sendRoute: RouteSender,
-  options: { locations?: LocationApi; demoPhone?: string; extractTurn?: ExtractTurn; recommendServices?: RecommendServices } = {},
+  options: { translateText?: TranslateText; locations?: LocationApi; demoPhone?: string; extractTurn?: ExtractTurn; recommendServices?: RecommendServices } = {},
 ): Promise<void> {
   const config = readAgentConfig();
   const state = await AgentStateStore.open();
@@ -100,6 +100,7 @@ export async function runAgent(
     recommendServices: options.recommendServices ?? recommendServices,
     state,
     sendRoute,
+    translateText: options.translateText ?? translateText,
     requestLocation: options.locations ? message => locations!.request(message) : undefined,
     lookupSharedLocation: options.locations ? (message, epoch) => locations!.snapshot(message, epoch) : undefined,
   });
@@ -115,6 +116,7 @@ export async function runAgent(
     sendRoute,
     pollMs: config.notificationPollMs,
     maxAttempts: config.notificationMaxAttempts,
+    translateText: options.translateText ?? translateText,
   });
 
   await notifications.start();

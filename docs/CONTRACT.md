@@ -62,6 +62,8 @@ interface InboundTurn {
   hasSharedLocation?: boolean; // trusted presence only; no coordinates enter extraction
   conversationKey: string; // trusted internal routing key
   intakeRevision: number;
+  hasSharedLocation?: boolean;
+  addressedFields?: CallerFactField[];
   messages: CallerMessage[];       // new ordered caller messages
   recentMessages: CallerMessage[]; // bounded prior caller context
   currentFacts: CallerFacts;
@@ -81,6 +83,7 @@ interface ExtractionResult {
   corrections: CallerFactField[];
   unresolvedFields: CallerFactField[];
   proposedQuestion: string | null;
+  questionField?: CallerFactField | null;
 }
 
 interface Recommendation {
@@ -162,13 +165,19 @@ Readiness requires a useful supported summary and a known location: a nonempty `
   - `recordExtractionFailure` sets `FAILED` with a sanitized error and leaves facts unchanged.
   - When the first report fails before any incident exists, the failure appears as `lastExtractionError` in the agent's context.
 - **Shared location.** `recordSharedLocation` is agent-only. It stores a provider-supplied pin or Find My location as `Incident.sharedLocation` (`latitude`, `longitude`, `accuracyMeters`, `label`, `source` `IMESSAGE_PIN | FIND_MY`, `sharedAt`). If the conversation has no active incident, it opens a partial one. It does not change caller facts or `intakeRevision`. Duplicate provider message IDs are no-ops, including after case closure. The pin is stored as an APPLIED caller message, `[Shared location: <label>]`, so it shows in the transcript. Never derive coordinates from caller prose. Coordinates must be finite and in latitude/longitude bounds; optional accuracy must be finite and nonnegative. Message IDs must be nonempty. `sharedAt` comes from the trusted provider envelope's `receivedAt`; missing optional metadata maps to null. A pin alone leaves the incident COLLECTING until an accepted report supplies a summary. After dispatch, a new location sets `needsReview` while preserving assignments and lifecycle.
-- **Human conversation control.** `takeOverConversation` claims an open incident for one dispatcher; a second dispatcher gets `TAKEN_OVER`. `releaseConversation` returns it to the agent (owner or ADMIN). Control is stored separately per incident and cannot carry into the next case. AGENT/DISPATCHER/ADMIN can read the control view; responders cannot. While controlled, extraction still records reports and corrections, but automated questions and generic OTHER replies pause. Caller-requested status replies and unit notifications continue. `sendDispatcherMessage` requires the controlling dispatcher and 1–2000 characters; `(case, dispatcher, clientMessageId)` deduplicates retries. It queues a `DISPATCHER_REPLY` and a `DISPATCHER` transcript row with `QUEUED` delivery. The agent sends on the committed private route and acknowledgment updates that same row to `SENT` or `FAILED`. Closed/resolved incidents reject control and send operations. Every outbound message retains the simulation label.
+- **Human conversation control.** Dispatchers can claim open conversations. Responders can claim and message only DISPATCHED incidents with an active assignment to their own unit. A dispatcher and its assigned responder can transfer control between them; operators of the same role cannot steal one another's chat. Only the owner (or ADMIN for release) can send/release. Completing the controlling responder's assignment releases control. Ending or restarting a case clears control. Agent/dispatcher/admin can read ownership; responders see ownership, transcripts and activity only for assigned cases. Extraction, caller-requested status replies and committed unit notifications continue while automated questions and generic OTHER replies pause. `sendDispatcherMessage` is the existing shared operator-send API: its owner checks also support responders, with `RESPONDER_REPLY` notifications and RESPONDER attribution. `(case, sender, clientMessageId)` deduplicates retries; delivery remains QUEUED/SENT/FAILED.
+
+- **Intake completion.** `missingIntakeFields` is shared by the worker and the console. It selects fields applicable to the incident category, treats a provider pin as a known location, and counts false/zero as known. Continue one question per caller turn until relevant fields are populated or explicitly addressed as unknown, or a human takes over. Unknown/ambiguous answers remain null and persist in `unresolvedFields`; later known values remove those entries. Unrelated medical or crime fields need not be filled for a fire report. Gemini identifies `questionField`; the worker rejects a question for an already-addressed field and supplies a deterministic fallback if a missing field has no proposed question. Intake can continue after dispatch until takeover.
+
+- **Translation.** Gemini detects each caller message's language (using the preceding case language as a hint for brief replies) and produces an English translation. Original messages remain unchanged for fact evidence. Summaries, incident categories and questions use English; caller replies, human messages and notifications are translated into the caller's language. The private additive `message_translation` table stores translations keyed to inbound/outbound rows or notification IDs. Dispatcher and assigned-responder transcripts project original text, `translatedText`, and `language`. Translation failures retain input for retry or mark delivery failed; known non-English replies are not silently sent in English. Notification translation is persisted before delivery and reused on retries. Case boundaries isolate language/translation context. No provider routes enter translation prompts.
+
+- **Local demo replay.** The runner's temporary loopback bridge accepts Restart demo only for a connected local dispatcher with the per-run capability and matching origin. It invokes the ADMIN-only `restart_demo` reducer. Current cases end, assignments complete, units become available, chat control is released and unsent jobs are CANCELLED. The designated worker skips cancelled jobs. Keep role grants, clients, provider dedupe history and IDs, and advance each active conversation's case epoch; do not delete records or restart services. Historical cases remain readable. External sends already accepted by Photon cannot be recalled. The bridge and button are absent from production builds.
 
 The `sharedLocation` column is appended with an unknown default. Missing fact fields map to null in the adapter, preserving false and zero. Adding the six fields to the nested database `CallerFacts` type changes the existing `facts` column type: SpacetimeDB 2.10.2 rejects an automatic upgrade (verified against the previous module locally). Batch #28 and #29 for the coordinated Maincloud publish; a development reset with `--delete-data` removes historical incidents and role grants. Adapter defaults do not preserve rows deleted by that reset. See [the deployment handoff](../spacetime/HANDOFF.md#maincloud-deployment-for-28-and-29).
 - **Dispatcher console reads.**
-  - `incident_conversation_view` (dispatcher only) returns the current case's caller messages and agent messages for each incident, latest 50, as `ConversationMessage` rows.
+  - `incident_conversation_view` (dispatcher/admin and responders for assigned cases) returns the current case's caller messages and agent messages for each incident, latest 50, as `ConversationMessage` rows.
   - Questions are recorded by `recordSentQuestion`. Each notification gets one row, written when `ackNotification` reports it delivered or failed.
-  - `incident_event_view` (dispatcher only) returns the activity log. Event kinds: `INCIDENT_CREATED`, `CALLER_MESSAGE`, `FACTS_UPDATED`, `LOCATION_RECEIVED`, `SERVICES_RECOMMENDED`, `EXTRACTION_FAILED`, `DISPATCH_CONFIRMED`, `UNIT_ASSIGNED`, `UNIT_ACCEPTED`, `UNIT_EN_ROUTE`, `UNIT_ON_SCENE`, `UNIT_COMPLETED`, `CALLER_NOTIFIED`, `INCIDENT_RESOLVED`, `INCIDENT_CLOSED`.
+  - `incident_event_view` (dispatcher/admin and responders for assigned cases) returns the activity log. Event kinds: `INCIDENT_CREATED`, `CALLER_MESSAGE`, `FACTS_UPDATED`, `LOCATION_RECEIVED`, `SERVICES_RECOMMENDED`, `EXTRACTION_FAILED`, `DISPATCH_CONFIRMED`, `UNIT_ASSIGNED`, `UNIT_ACCEPTED`, `UNIT_EN_ROUTE`, `UNIT_ON_SCENE`, `UNIT_COMPLETED`, `CALLER_NOTIFIED`, `INCIDENT_RESOLVED`, `INCIDENT_CLOSED`.
   - Neither view exposes conversation keys, routes, extraction errors, or model output that was never sent.
 - **Startup work.** After reconnecting, the agent drains `listPendingConversationContexts` (current-case RECEIVED input) and `listPendingNotifications` (unsent jobs). Both carry the route.
 
@@ -210,7 +219,7 @@ Types live in `@flare/contracts` (`packages/contracts/src/index.ts`). Operations
 | `recordExtractionFailure` | `recordExtractionFailure(conn, { conversationKey, messageIds, error })` | |
 | `applyIntakePatch` | `applyIntakePatch(conn, { conversationKey, expectedRevision, sourceMessageIds, result, recommendation })` | REPORT/CORRECTION only. Evidence quotes must be exact substrings of a recorded message in the same conversation. New evidence for a field replaces older evidence for that field |
 | `completeInboundWithoutPatch` | `completeInboundWithoutPatch(conn, { conversationKey, messageIds, intent, replyText? })` | `replyText` is queued as an `INFO_REPLY` notification |
-| `recordSentQuestion` | `recordSentQuestion(conn, { conversationKey, question, delivered, error? })` | |
+| `recordSentQuestion` | `recordSentQuestion(conn, { conversationKey, question, delivered, error?, translatedText?, language? })` | |
 | Pending notifications | `listPendingNotifications(conn)`, `onNotification(conn, cb)` | PENDING and FAILED jobs. Each carries `route`, committed `text`, `eventAt` and `eventAssignmentStatus` |
 | `ackNotification` | `ackNotification(conn, { notificationId, delivered, error? })` | |
 | `confirmDispatchAndAssign` | `confirmDispatchAndAssign(conn, { incidentId, confirmedServices, unitIds })` | |
@@ -219,9 +228,10 @@ Types live in `@flare/contracts` (`packages/contracts/src/index.ts`). Operations
 | `closeIncident` | `closeIncident(conn, { incidentId, reason })` | `Incident.closeReason` holds the reason |
 | Reads | `listIncidents`, `listAssignments`, `listUnits`, `getMyRole` | Role-scoped: a responder sees only its unit's assignments and their incidents |
 | Shared location | `recordSharedLocation(conn, { provider, conversationKey, route, messageId, receivedAt, latitude, longitude, accuracyMeters?, label?, source })` | Agent only |
-| Console reads | `listConversation(conn, incidentId)`, `listIncidentEvents(conn, incidentId)` | Dispatcher only, oldest first |
-| Conversation control | `getConversationController(conn, incidentId)`, `takeOverConversation(conn, { incidentId })`, `releaseConversation(conn, { incidentId })` | Claim/release for dispatchers; owner identity is visible to agent/dispatcher/admin |
-| Dispatcher reply | `sendDispatcherMessage(conn, { incidentId, text, clientMessageId })` | Requires conversation owner; retry with the same client ID |
+| Translation writes | `recordInboundTranslation(conn, { conversationKey, messageId, language, translatedText })`, `prepareNotificationTranslation(conn, { notificationId, language, translatedText })` | Agent only; case-scoped and idempotent |
+| Console reads | `listConversation(conn, incidentId)`, `listIncidentEvents(conn, incidentId)` | Dispatcher/admin and responders for their assigned cases, oldest first |
+| Conversation control | `getConversationController(conn, incidentId)`, `takeOverConversation(conn, { incidentId })`, `releaseConversation(conn, { incidentId })` | Dispatchers and assigned active responders; one owner per case |
+| Human reply | `sendDispatcherMessage(conn, { incidentId, text, clientMessageId })` | Requires conversation owner; retry with the same client ID |
 
 Rejected operations throw `FlareOpError` with a `code`: `UNAUTHORIZED`, `NOT_FOUND`, `STALE_REVISION`, `STALE_CASE`, `INVALID_ROUTE`, `PARTIALLY_APPLIED_SOURCES`, `UNKNOWN_MESSAGE`, `INVALID_INTENT`, `INVALID_FIELD`, `INVALID_VALUE_TYPE`, `MISSING_EVIDENCE`, `EVIDENCE_QUOTE_MISMATCH`, `UNKNOWN_EVIDENCE_MESSAGE`, `NOT_READY`, `ALREADY_DISPATCHED`, `UNIT_CONFLICT`, `UNIT_SERVICE_MISMATCH`, `SERVICE_WITHOUT_UNIT`, `INVALID_TRANSITION`, `ASSIGNMENTS_NOT_COMPLETED`, `NOT_CLOSABLE`, `HAS_ASSIGNMENTS`, `REASON_REQUIRED`, `INCIDENT_CLOSED`, `INVALID_LATITUDE`, `INVALID_LONGITUDE`, `INVALID_ACCURACY`, `INVALID_LOCATION_SOURCE`, among others.
 

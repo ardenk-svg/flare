@@ -109,3 +109,14 @@ Open items:
 - [x] Tune the prompt for the live correction, uncertainty, explicit fire/smoke, and no-inferred-injury cases.
 - [ ] Human review of summaries and questions in the eval report.
 - [ ] Integrate with Person 1's agent and run the full loop. Then complete the acceptance checklist in [docs/DEMO.md](../../docs/DEMO.md).
+
+
+## Multilingual intake, responder chat and repeat demos (2026-10-04)
+
+Shared `missingIntakeFields` drives the console and worker. Intake continues for relevant facts, preserves explicit unknown answers across turns, and stops when complete or controlled by a dispatcher/assigned responder. Assigned responders now read their case transcript/activity and can claim/send/release chat; same-role ownership cannot be stolen. Dispatchers coordinate assignment/resolve and can transfer control back. Responder completion releases chat control.
+
+Gemini translation uses existing credentials and the structured-output generator with a bounded deadline. Original text remains the evidence source; transcripts show English translations of caller text and translated outgoing text. A private additive `message_translation` table stores these separately. Notification translations persist before external delivery and survive retries. Translation and language context stay within the case; failures retain original messages or record failed delivery.
+
+The local dispatcher Restart demo button calls the temporary loopback bridge, which checks origin/capability and the connected dispatcher's grant before the publisher invokes ADMIN-only `restart_demo`. It ends cases, completes assignments, frees units, releases control and cancels unsent notifications. IDs, dedupe history, role grants, services and tabs remain. Send another report in the same phone thread. The control is absent from production/ordinary web startup. Publish the updated module and regenerate bindings before running clients; persistent table changes are additive and do not require a data wipe.
+
+Verification: root check passed 99 tests plus typechecks/build; 143 live adapter checks passed on an isolated local database; e2e:auto passed assigned-responder authorization, delivery, all service lifecycles and two restarts without restarting the worker or clients. Real Gemini passed synthetic Spanish detection/English translation, Spanish replies with the simulation label, and original-language fact evidence. Browser verification showed both text versions, responder takeover/composer/queued attribution, and the local restart success message. No real iMessage was sent by these tests.

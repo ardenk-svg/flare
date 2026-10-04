@@ -3,7 +3,7 @@
 import {
   advanceAssignment, closeIncident, confirmDispatchAndAssign, connectFlare, FlareOpError, getMyRole,
   listAssignments, listConversation, listIncidentEvents, listIncidents, listUnits, resolveIncident, type FlareConnection,
-  getConversationController, takeOverConversation, releaseConversation, sendDispatcherMessage,
+  getConversationController, getConversationControl, takeOverConversation, releaseConversation, sendDispatcherMessage,
 } from "@flare/data";
 import type { Incident } from "@flare/contracts";
 import type {
@@ -50,7 +50,7 @@ export function toExtraction(i: Incident): IncidentView["extraction"] {
 /** Incident projection plus the dispatcher-only transcript and activity log (empty views for responders). */
 function toView(i: Incident, conn: FlareConnection["conn"]): IncidentView {
   const conversation: ConversationMessage[] = listConversation(conn, i.id)
-    .map(({ sender, text, at, delivery }) => (delivery ? { sender, text, at, delivery } : { sender, text, at }));
+    .map(({ sender, text, at, delivery, translatedText, language }) => ({ sender, text, at, translatedText, language, ...(delivery ? { delivery } : {}) }));
   const events: ActivityEvent[] = listIncidentEvents(conn, i.id).map((e) => ({
     id: e.id, kind: e.kind, at: e.at,
     ...(e.unitId ? { unitId: e.unitId } : {}),
@@ -66,6 +66,8 @@ function toView(i: Incident, conn: FlareConnection["conn"]): IncidentView {
     ruleIds: i.recommendationRuleIds, confirmedServices: i.confirmedServices,
     needsReview: i.needsReview, closeReason: i.closeReason, sharedLocation: i.sharedLocation,
     dispatcherIdentity: getConversationController(conn, i.id),
+    controllerRole: getConversationControl(conn, i.id)?.role, controllerUnitId: getConversationControl(conn, i.id)?.unitId,
+    unresolvedFields: i.unresolvedFields,
     ...(conversation.length ? { conversation } : {}),
     ...(events.length ? { events } : {}),
     extraction: toExtraction(i),

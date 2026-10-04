@@ -130,6 +130,7 @@ export function validateModelOutput(rawText: string | undefined, turn: InboundTu
   } else if (parsed.proposedQuestion !== undefined && parsed.proposedQuestion !== null && typeof parsed.proposedQuestion !== "string") {
     problems.push("proposedQuestion is not a string");
   }
+  if (parsed.questionField !== undefined && parsed.questionField !== '' && !isCallerFactField(parsed.questionField)) problems.push('questionField is not a caller fact field');
   // Status replies come from committed state, not a model question.
   if (intent === "STATUS_QUERY") proposedQuestion = null;
 
@@ -146,6 +147,7 @@ export function validateModelOutput(rawText: string | undefined, turn: InboundTu
 
   return {
     ok: true,
-    result: { intent, patch, summary, evidence, corrections, unresolvedFields, proposedQuestion },
+    result: { intent, patch, summary, evidence, corrections, unresolvedFields, proposedQuestion,
+      questionField: isCallerFactField(parsed.questionField) ? parsed.questionField : null },
   };
 }

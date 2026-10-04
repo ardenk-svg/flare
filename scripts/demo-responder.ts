@@ -7,11 +7,12 @@ export async function startDemoResponderServer(options: {
   key: string;
   origin: string;
   authorize(identity: string, unit: string): void;
+  restart?(identity: string): void;
 }): Promise<{ port: number; close(): Promise<void> }> {
   const server = createServer((req, res) => {
     res.setHeader("Cache-Control", "no-store");
     const finish = (status: number) => { res.writeHead(status); res.end(); };
-    if (req.url !== "/__flare_demo/responder" || req.method !== "POST") return finish(404);
+    if (!["/__flare_demo/responder", "/__flare_demo/restart"].includes(req.url ?? "") || req.method !== "POST") return finish(404);
     if (req.headers["x-flare-demo-key"] !== options.key || req.headers.origin !== options.origin) return finish(403);
     let body = "";
     req.setEncoding("utf8");
@@ -23,8 +24,14 @@ export async function startDemoResponderServer(options: {
       if (res.writableEnded) return;
       try {
         const { identity, unit } = JSON.parse(body);
-        if (typeof identity !== "string" || !/^[0-9a-f]{64}$/i.test(identity) || !DEMO_UNITS.includes(unit)) return finish(400);
-        options.authorize(identity.toLowerCase(), unit);
+        if (typeof identity !== "string" || !/^[0-9a-f]{64}$/i.test(identity)) return finish(400);
+        if (req.url === '/__flare_demo/restart') {
+          if (!options.restart) return finish(404);
+          options.restart(identity.toLowerCase());
+        } else {
+          if (!DEMO_UNITS.includes(unit)) return finish(400);
+          options.authorize(identity.toLowerCase(), unit);
+        }
         finish(204);
       } catch { finish(403); }
     });

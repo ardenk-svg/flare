@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import Dispatcher from "./routes/Dispatcher";
 import Responder from "./routes/Responder";
@@ -24,6 +25,19 @@ function UnitPicker() {
   );
 }
 
+function RestartDemo() {
+  const { identity, identityHex, connection, access } = useSnapshot();
+  const [pending, setPending] = useState(false);
+  const [result, setResult] = useState('');
+  if (!import.meta.env.DEV || !import.meta.env.VITE_FLARE_DEMO_GRANT_KEY || identity.role !== 'dispatcher') return null;
+  return <div className="demo-restart"><button className="btn small-btn" disabled={pending || connection !== 'connected' || access !== 'ok'} title="End current mock cases and free units. Keep the stack, tabs, phone thread and role grants running."
+    onClick={async () => { setPending(true); setResult(''); try {
+      const response = await fetch('/__flare_demo/restart', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Flare-Demo-Key': import.meta.env.VITE_FLARE_DEMO_GRANT_KEY }, body: JSON.stringify({ identity: identityHex }) });
+      if (!response.ok) throw new Error('Demo restart failed.');
+      setResult('Ready — send a new report from the same phone.');
+    } catch { setResult('Could not restart the local demo.'); } finally { setPending(false); } }}>{pending ? 'Restarting…' : 'Restart demo'}</button><span role="status" className="small">{result}</span></div>;
+}
+
 // Plain <a> links (full reload): the identity is picked per page load, in fixture and live mode alike.
 function TopBar() {
   const { pathname } = useLocation();
@@ -41,6 +55,7 @@ function TopBar() {
           {pathname.startsWith("/responder") && <UnitPicker />}
         </nav>
         <div className="topbar-right">
+          <RestartDemo />
           <IdentityBadge />
           <ConnectionStatus />
         </div>

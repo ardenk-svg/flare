@@ -1,6 +1,7 @@
 import {
   emptyFacts,
   mergeFacts,
+  missingIntakeFields, INTAKE_QUESTIONS,
   type Assignment,
   type ConversationContext,
   type ExtractTurn,
@@ -10,6 +11,7 @@ import {
 
 import { toConversationRoute, toProviderRoute, type AgentDataPort, type ExtractionFailure } from "./data-port.js";
 import { AgentStateStore } from "./state-store.js";
+import type { TranslateText } from "@flare/intake";
 import { ConversationQueue } from "./conversation-queue.js";
 import type {
   InboundMessageHandler,
@@ -32,6 +34,7 @@ export interface AgentOrchestratorOptions {
   sendRoute: RouteSender;
   logger?: OrchestratorLogger;
   maxStaleRetries?: number;
+  translateText?: TranslateText;
   requestLocation?: (message: NormalizedInboundMessage) => Promise<string>;
   lookupSharedLocation?: (message: NormalizedInboundMessage, caseEpoch?: number) => Promise<import("./types.js").NormalizedSharedLocation | null>;
 }
@@ -70,6 +73,7 @@ function buildTurn(context: ConversationContext): InboundTurn {
     currentFacts: hasActiveIncident ? context.currentFacts : emptyFacts(),
     currentSummary: hasActiveIncident ? context.currentSummary : "",
     hasSharedLocation: !!context.activeIncident?.sharedLocation,
+    addressedFields: context.activeIncident?.unresolvedFields ?? [],
     lastQuestion: hasActiveIncident ? context.lastQuestion : null,
   };
 }
@@ -101,6 +105,7 @@ export class AgentOrchestrator {
   readonly #logger: OrchestratorLogger;
   readonly #maxStaleRetries: number;
   readonly #queue = new ConversationQueue();
+  readonly #translateText: TranslateText | undefined;
   readonly #requestLocation: AgentOrchestratorOptions["requestLocation"];
   readonly #lookupSharedLocation: AgentOrchestratorOptions["lookupSharedLocation"];
 
@@ -112,6 +117,7 @@ export class AgentOrchestrator {
     this.#sendRoute = options.sendRoute;
     this.#logger = options.logger ?? console;
     this.#maxStaleRetries = options.maxStaleRetries ?? 2;
+    this.#translateText = options.translateText;
     this.#requestLocation = options.requestLocation;
     this.#lookupSharedLocation = options.lookupSharedLocation;
   }
@@ -141,7 +147,10 @@ export class AgentOrchestrator {
   });
 
   readonly handleLocation: SharedLocationHandler = message => this.#queue.run(message.conversationKey, async () => {
+    const context = this.#data.getConversationContext(message.conversationKey);
+    const hadLocation = !!context?.activeIncident?.sharedLocation || !!context?.currentFacts.locationText;
     await this.#recordLocation(message);
+    if (!hadLocation) await this.#askNext(message.conversationKey);
   });
 
   async #recordLocation(message: Parameters<SharedLocationHandler>[0]): Promise<void> {
@@ -198,6 +207,19 @@ export class AgentOrchestrator {
       const context = this.#data.getConversationContext(conversationKey);
       if (!context || context.pendingMessages.length === 0) return;
       const messageIds = context.pendingMessages.map((message) => message.id);
+      if (this.#translateText) {
+        try {
+          for (const message of context.pendingMessages) {
+            if (this.#data.getInboundTranslation(conversationKey, message.id)) continue;
+            const translated = await this.#translateText({ text: message.text, targetLanguage: 'en', sourceLanguage: this.#data.getConversationContext(conversationKey)?.callerLanguage });
+            await this.#data.recordInboundTranslation({ conversationKey, messageId: message.id, language: translated.sourceLanguage, translatedText: translated.text });
+          }
+        } catch {
+          await this.#data.recordExtractionFailure({ conversationKey, messageIds, error: { code: 'PROVIDER_ERROR', message: 'Gemini translation unavailable; original input is retained for retry.', retryable: true } });
+          return;
+        }
+      }
+
 
       if (context.pendingMessages.every((message) => STATUS_QUERY.test(message.text))) {
         await this.#data.completeInboundWithoutPatch({
@@ -240,8 +262,9 @@ export class AgentOrchestrator {
           replyText:
             result.intent === "STATUS_QUERY"
               ? renderCommittedStatus(context, this.#data.listAssignments())
-              : context.dispatcherIdentity ? undefined : OTHER_REPLY,
+              : context.dispatcherIdentity || context.activeIncident ? undefined : OTHER_REPLY,
         });
+        if (result.intent === 'OTHER' && context.activeIncident) await this.#askNext(conversationKey, reply);
         return;
       }
 
@@ -270,15 +293,23 @@ export class AgentOrchestrator {
         if (pin) await this.#recordLocation(pin);
       }
 
-      if (
-        result.proposedQuestion &&
-        !this.#data.getConversationContext(conversationKey)?.dispatcherIdentity &&
-        !(context.lastQuestionDelivery === "SENT" && context.lastQuestion === result.proposedQuestion)
-      ) {
-        await this.#sendQuestion(conversationKey, result.proposedQuestion, reply);
-      }
+      await this.#askNext(conversationKey, reply, result);
+
       return;
     }
+  }
+
+  async #askNext(conversationKey: string, reply?: ReplyPort, result?: import("@flare/contracts").ExtractionResult): Promise<void> {
+    const current = this.#data.getConversationContext(conversationKey);
+    if (!current || current.dispatcherIdentity || current.activeIncident?.status === 'CLOSED' || current.activeIncident?.status === 'RESOLVED') return;
+    const facts = mergeFacts(current.currentFacts, result?.patch ?? {});
+    const addressed = [...(current.activeIncident?.unresolvedFields ?? []), ...(result?.unresolvedFields ?? [])];
+    const missing = missingIntakeFields(facts, !!current.activeIncident?.sharedLocation, addressed);
+    if (!missing.length) return;
+    let question = result?.questionField && missing.includes(result.questionField) ? result.proposedQuestion : null;
+    if (question && LOCATION_QUESTION.test(question) && !missing.includes('locationText')) question = null;
+    question ||= INTAKE_QUESTIONS[missing[0]];
+    await this.#sendQuestion(conversationKey, question, reply);
   }
 
   async #sendQuestion(
@@ -289,18 +320,26 @@ export class AgentOrchestrator {
     const current = this.#data.getConversationContext(conversationKey);
     if (current?.dispatcherIdentity) return;
     if (LOCATION_QUESTION.test(question) && (current?.activeIncident?.sharedLocation || current?.currentFacts.locationText?.trim())) return;
+    question = question.startsWith("[SIMULATION]") ? question : `[SIMULATION] ${question}`;
+    let translatedText: string | undefined;
+    const language = current?.callerLanguage ?? 'en';
     try {
+      if (this.#translateText && !language.startsWith('en')) translatedText = (await this.#translateText({ text: question, sourceLanguage: 'en', targetLanguage: language })).text;
+      const fresh = this.#data.getConversationContext(conversationKey);
+      if (fresh?.dispatcherIdentity || fresh?.caseEpoch !== current?.caseEpoch) return;
+      const text = translatedText ?? question;
       if (reply) {
-        await reply.send(question);
+        await reply.send(text);
       } else {
         const stored = this.#data.getConversationContext(conversationKey)?.route;
         const route = this.#state.routeFor(conversationKey) ?? (stored ? toProviderRoute(stored) : undefined);
         if (!route) throw new Error("No durable Spectrum route is available.");
-        await this.#sendRoute(route, question);
+        await this.#sendRoute(route, text);
       }
       await this.#data.recordSentQuestion({
         conversationKey,
         question,
+        ...(translatedText ? { translatedText, language } : {}),
         delivered: true,
       });
     } catch (error) {
@@ -308,6 +347,7 @@ export class AgentOrchestrator {
       await this.#data.recordSentQuestion({
         conversationKey,
         question,
+        ...(translatedText ? { translatedText, language } : {}),
         delivered: false,
         error: message,
       });

@@ -28,6 +28,9 @@ export interface IncidentView {
   conversation?: ConversationMessage[];
   /** Dispatcher identity currently controlling the caller conversation. */
   dispatcherIdentity?: string | null;
+  controllerRole?: string | null;
+  controllerUnitId?: string | null;
+  unresolvedFields?: CallerFactField[];
   /** Backend activity log (dispatcher only). Without it the UI derives a limited stream from timestamps. */
   events?: ActivityEvent[];
   createdAt: string;
@@ -35,7 +38,9 @@ export interface IncidentView {
 }
 
 export interface ConversationMessage {
-  sender: "CALLER" | "AGENT" | "DISPATCHER";
+  translatedText?: string | null;
+  language?: string | null;
+  sender: "CALLER" | "AGENT" | "DISPATCHER" | "RESPONDER";
   text: string;
   at: string;
   /** Agent messages only. */
@@ -43,7 +48,7 @@ export interface ConversationMessage {
 }
 
 export type ActivityKind =
-  | "DISPATCHER_TAKEOVER" | "AGENT_RESUMED"
+  | "RESPONDER_TAKEOVER" | "DEMO_RESTARTED" | "DISPATCHER_TAKEOVER" | "AGENT_RESUMED"
   | "INCIDENT_CREATED" | "CALLER_MESSAGE" | "FACTS_UPDATED" | "LOCATION_RECEIVED" | "SERVICES_RECOMMENDED"
   | "EXTRACTION_FAILED" | "DISPATCH_CONFIRMED" | "UNIT_ASSIGNED" | "UNIT_ACCEPTED" | "UNIT_EN_ROUTE"
   | "UNIT_ON_SCENE" | "UNIT_COMPLETED" | "CALLER_NOTIFIED" | "INCIDENT_RESOLVED" | "INCIDENT_CLOSED";

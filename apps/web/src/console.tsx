@@ -6,7 +6,7 @@ import {
 } from "./components";
 import { useClient, useSnapshot } from "./data";
 import {
-  ASSIGNMENT_TEXT, activityLabel, deriveSeverity, formatElapsed, formatFact, getActivity, getKnownFacts,
+  ASSIGNMENT_TEXT, FACT_LABELS, activityLabel, deriveSeverity, formatElapsed, formatFact, getActivity, getKnownFacts,
   getRelevantMissingFacts, headlineFact, incidentTitle, MAJOR_EVENTS, recommendationReasons, SERVICE_LABEL, shortAge,
   unitStatusLabel, type Severity,
 } from "./incident";
@@ -224,6 +224,7 @@ export function IncidentFacts({ incident }: { incident: IncidentView }) {
           )}
         </div>
         <div>
+          {!!incident.unresolvedFields?.length && <p className="muted small">Caller could not confirm: {incident.unresolvedFields.map(f => FACT_LABELS[f] ?? f).join(", ")}. These remain unknown.</p>}
           <h4 className="sublabel">Still needed</h4>
           {missing.length === 0 ? <p className="muted small">Nothing outstanding for this kind of incident.</p> : (
             <ul className="needed">
@@ -240,23 +241,27 @@ export function IncidentFacts({ incident }: { incident: IncidentView }) {
 function Bubble({ m }: { m: ConversationMessage }) {
   return (
     <li className={`msg ${m.sender === "CALLER" ? "caller" : "agent"}`}>
-      <span className="msg-who">{m.sender === "CALLER" ? "Caller" : m.sender === "DISPATCHER" ? "Dispatcher" : "Agent"}<time dateTime={m.at}>{clock(m.at)}</time>
+      <span className="msg-who">{m.sender === "CALLER" ? "Caller" : m.sender === "DISPATCHER" ? "Dispatcher" : m.sender === "RESPONDER" ? "Responder" : "Agent"}<time dateTime={m.at}>{clock(m.at)}</time>
         {m.delivery === "FAILED" && <span className="chip danger">Not delivered</span>}</span>
       {m.delivery === "QUEUED" && <span className="chip">Queued</span>}
-      <span className="msg-text">{m.text}</span>
+      <span className="msg-text" dir="auto">{m.text}</span>
+      {m.translatedText && m.translatedText !== m.text && <div className="msg-translation"><span className="sublabel">{m.sender === 'CALLER' ? `English translation · original ${m.language ?? 'language'}` : `Sent to caller · ${m.language ?? 'translated'}`}</span><span className="msg-text" dir="auto">{m.translatedText}</span></div>}
     </li>
   );
 }
 
 export function CallerConversation({ incident }: { incident: IncidentView }) {
   const client = useClient();
-  const { connection, identityHex } = useSnapshot();
+  const { connection, identityHex, identity, assignments } = useSnapshot();
   const control = useAction();
   const send = useAction();
   const [draft, setDraft] = useState("");
   const requestId = useRef<string | null>(null);
   const mine = !!incident.dispatcherIdentity && incident.dispatcherIdentity === identityHex;
   const taken = !!incident.dispatcherIdentity;
+  const eligible = identity.role === 'dispatcher' || assignments.some(a => a.incidentId === incident.id && a.unitId === identity.unitId && a.status !== 'COMPLETED');
+  const other = incident.controllerRole === 'RESPONDER' ? incident.controllerUnitId ?? 'Another responder' : 'Another dispatcher';
+  const canTransfer = taken && !mine && ((identity.role === 'responder' && incident.controllerRole !== 'RESPONDER') || (identity.role === 'dispatcher' && incident.controllerRole === 'RESPONDER'));
   const offline = connection !== "connected";
   const dialog = useRef<HTMLDialogElement>(null);
   const messages = incident.conversation;
@@ -279,14 +284,14 @@ export function CallerConversation({ incident }: { incident: IncidentView }) {
           {last && <> · last message <RelativeTime iso={last.at} /></>}
         </span>
         {messages && messages.length > 4 && <button className="btn-link" onClick={() => dialog.current?.showModal()}>View full conversation</button>}
-        <button className="btn small-btn" disabled={done || offline || control.pending || (taken && !mine)}
+        <button className="btn small-btn" disabled={done || offline || !eligible || control.pending || (taken && !mine && !canTransfer)}
           onClick={() => control.run(() => mine ? client.releaseConversation({ incidentId: incident.id }) : client.takeOverConversation({ incidentId: incident.id }))}>
-          {control.pending ? "Updating…" : mine ? "Return to agent" : taken ? "Taken by another dispatcher" : "Take over"}
+          {control.pending ? "Updating…" : mine ? "Return to agent" : taken && !canTransfer ? `Taken by ${other.toLowerCase()}` : canTransfer ? "Take over chat" : "Take over"}
         </button>
       </div>
       <ActionError message={control.error} />
-      {taken && !done && <p className="small muted">{mine ? "You control this conversation." : "Another dispatcher controls this conversation."} Automated questions pause. Facts and unit status updates continue.</p>}
-      {mine && !done && (
+      {taken && !done && <p className="small muted">{mine ? "You control this conversation." : `${other} controls this conversation.`} Automated questions pause. Facts and unit status updates continue.</p>}
+      {mine && eligible && !done && (
         <form className="dispatcher-compose" onSubmit={async event => {
           event.preventDefault();
           if (!draft.trim() || send.pending || offline) return;
@@ -299,7 +304,7 @@ export function CallerConversation({ incident }: { incident: IncidentView }) {
           <textarea id={`reply-${incident.id}`} value={draft} maxLength={2000} rows={3} placeholder="Ask for details or clarify the mock report…"
             disabled={offline || send.pending} onChange={event => { setDraft(event.target.value); requestId.current = null; }} />
           <button className="btn primary" disabled={offline || send.pending || !draft.trim()}>{send.pending ? "Queueing…" : "Send message"}</button>
-          <p className="muted small">Messages are labelled as simulated. Delivery appears in the conversation.</p>
+          <p className="muted small">Messages are translated into the caller’s language and labelled as simulated. Delivery appears in the conversation.</p>
           <ActionError message={send.error} />
         </form>
       )}

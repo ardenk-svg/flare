@@ -14,7 +14,7 @@ import {
   listAssignments,
   listIncidents,
   listConversation,
-  getConversationController, takeOverConversation, releaseConversation, sendDispatcherMessage,
+  getConversationController, getConversationContext, recordInboundTranslation, takeOverConversation, releaseConversation, sendDispatcherMessage,
   resolveIncident,
   type FlareConnection,
 } from "@flare/data";
@@ -117,7 +117,7 @@ const fixtureExtract: ExtractTurn = async turn => {
   let summary: string;
   let corrections: ExtractionResult["corrections"] = [];
   let proposedQuestion: string | null = null;
-  if (/smoke/i.test(caller.text)) { patch = { fireOrSmoke: true }; summary = "Caller reports smoke outside."; proposedQuestion = "[SIMULATION] Which building and entrance?"; }
+  if (/smoke/i.test(caller.text)) { patch = { incidentType: "smoke", fireOrSmoke: true }; summary = "Caller reports smoke outside."; proposedQuestion = "[SIMULATION] Which building and entrance?"; }
   else if (/correction/i.test(caller.text)) { patch = { locationText: "South entrance" }; summary = "Smoke at the south entrance."; corrections = ["locationText"]; }
   else if (/north/i.test(caller.text)) { patch = { locationText: "North entrance of the demo student center" }; summary = "Smoke at the north entrance."; }
   else if (/crashed/i.test(caller.text)) { patch = { locationText: "Demo Street" }; summary = "Car crashed into a pole on Demo Street."; }
@@ -126,12 +126,13 @@ const fixtureExtract: ExtractTurn = async turn => {
   else return { ok: true, result: { intent: "OTHER", patch: {}, summary: "", evidence: [], corrections: [], unresolvedFields: [], proposedQuestion: null } };
   return { ok: true, result: { intent: corrections.length ? "CORRECTION" : "REPORT", patch, summary,
     evidence: Object.keys(patch).map(field => ({ field: field as keyof CallerFacts, messageId: caller.id, quote: caller.text })),
-    corrections, unresolvedFields: proposedQuestion ? ["locationText"] : [], proposedQuestion } };
+    corrections, unresolvedFields: [], proposedQuestion, questionField: proposedQuestion ? "locationText" : null } };
 };
 
 function startAgent() {
   const app = new ScriptedApp();
   const done = runAgent(app, async (route, text) => void routed.push({ route, text }), {
+    translateText: process.argv.includes("--live-gemini") ? undefined : async req => ({ text: req.text, sourceLanguage: req.sourceLanguage ?? "en", targetLanguage: req.targetLanguage }),
     extractTurn: process.argv.includes("--live-gemini") ? undefined : fixtureExtract,
   });
   return { app, done };
@@ -184,8 +185,8 @@ async function main() {
   check("responders cannot read conversation ownership", getConversationController(R, incidentId) === null);
   try { await takeOverConversation(dispatcher2.conn, { incidentId }); check("another dispatcher cannot steal the conversation", false); }
   catch (error) { check("another dispatcher cannot steal the conversation", (error as { code?: string }).code === "TAKEN_OVER"); }
-  try { await takeOverConversation(R, { incidentId }); check("responders cannot take over caller conversations", false); }
-  catch (error) { check("responders cannot take over caller conversations", (error as { code?: string }).code === "UNAUTHORIZED"); }
+  try { await takeOverConversation(R, { incidentId }); check("unassigned responders cannot take over caller conversations", false); }
+  catch (error) { check("unassigned responders cannot take over caller conversations", (error as { code?: string }).code === "UNAUTHORIZED"); }
   const humanReply = { incidentId, text: "Which entrance should the mock crew use?", clientMessageId: "e2e-human-1" };
   try { await sendDispatcherMessage(dispatcher2.conn, humanReply); check("only the controlling dispatcher can message the caller", false); }
   catch (error) { check("only the controlling dispatcher can message the caller", (error as { code?: string }).code === "NOT_CONVERSATION_OWNER"); }
@@ -224,6 +225,19 @@ async function main() {
   await waitFor("dispatch-confirmed notification delivered to the caller's route", () =>
     routed.some((m) => /SIMULATION/.test(m.text) && m.route.spaceId === SPACE_ID && /FIRE-01/.test(m.text)), 15_000);
 
+  await waitFor("assigned responder sees only its caller transcript", () => listConversation(R, incidentId).length > 0 && [...R.db.incidentConversationView.iter()].every(row => row.incidentId.toString() === incidentId), 5000);
+  check("unassigned EMS cannot read the fire conversation", listConversation(ems.conn, incidentId).length === 0);
+  await takeOverConversation(R, { incidentId });
+  await waitFor("assigned responder can take over the chat", () => getConversationController(R, incidentId) === responder.identityHex, 5000);
+  const responderReply = { incidentId, text: 'Mock crew received your details.', clientMessageId: 'e2e-responder-1' };
+  await sendDispatcherMessage(R, responderReply); await sendDispatcherMessage(R, responderReply);
+  await waitFor("responder chat is delivered with responder attribution once", () => listConversation(R, incidentId).filter(row => row.sender === 'RESPONDER' && row.delivery === 'SENT').length === 1, 10000);
+  try { await sendDispatcherMessage(ems.conn, responderReply); check('unassigned units cannot send to the caller', false); }
+  catch (error) { check('unassigned units cannot send to the caller', (error as { code?: string }).code === 'UNAUTHORIZED'); }
+  await takeOverConversation(D, { incidentId });
+  await waitFor('dispatcher can regain coordination of responder chat', () => getConversationController(D, incidentId) === dispatcher.identityHex, 5000);
+  await releaseConversation(D, { incidentId });
+
   // ---- Restart with unacknowledged work: responder moves while the agent is down ----
   await agent.app.stop();
   await agent.done;
@@ -249,8 +263,9 @@ async function main() {
     routed.slice(beforeStatus).some((m) => /FIRE-01 EN_ROUTE/.test(m.text)), 15_000);
   console.log(`      status reply: ${JSON.stringify(routed.at(-1)?.text)}`);
   check("status query created no new incident", listIncidents(D).length === 1);
+  const questionsBeforeGreeting = replies.length;
   agent.app.push("Hello");
-  await waitFor("OTHER response is delivered and recorded", () => listConversation(D, incidentId).some(row => row.sender === "AGENT" && /I can record a mock incident/.test(row.text) && row.delivery === "SENT"), 10_000);
+  await waitFor("unfinished intake continues after a greeting", () => replies.length > questionsBeforeGreeting, 10_000);
   await waitFor("every delivered question and notification appears in the transcript", () => {
     const rows = listConversation(D, incidentId);
     return [...replies, ...routed.map(item => item.text)].every(text => rows.some(row => row.sender !== "CALLER" && row.delivery === "SENT" && row.text === text));
@@ -311,6 +326,23 @@ async function main() {
   for (const nextStatus of ["ACCEPTED", "EN_ROUTE", "ON_SCENE", "COMPLETED"] as const) await advanceAssignment(police.conn, { assignmentId: policeAssignment.id, nextStatus });
   await waitFor("police completes the full responder lifecycle", () => listAssignments(D).find(a => a.id === policeAssignment.id)?.status === "COMPLETED", 5000);
   await resolveIncident(D, { incidentId: caseD.id });
+
+  // Repeat twice without restarting runAgent or any client. IDs and phone dedupe stay stable.
+  for (let rehearsal = 0; rehearsal < 2; rehearsal++) {
+    const beforeCases = new Set(listIncidents(D).map(i => i.id));
+    agent.app.push('Simulation: I see smoke outside.');
+    await waitFor(`rehearsal ${rehearsal + 1}: report starts a new case`, () => listIncidents(D).some(i => !beforeCases.has(i.id)), 45000);
+    const current = listIncidents(D).find(i => !beforeCases.has(i.id))!;
+    agent.app.push('North entrance of the demo student center.');
+    await waitFor('rehearsal location commits', () => listIncidents(D).find(i => i.id === current.id)?.facts.locationText !== null, 45000);
+    await confirmDispatchAndAssign(D, { incidentId: current.id, confirmedServices: ['FIRE'], unitIds: ['FIRE-01'] });
+    await waitFor('rehearsal unit is assigned', () => listAssignments(R).some(a => a.incidentId === current.id), 5000);
+    await takeOverConversation(R, { incidentId: current.id });
+    cli('restart_demo');
+    await waitFor('restart ends the case and releases its chat', () => listIncidents(D).find(i => i.id === current.id)?.status === 'RESOLVED' && getConversationController(D, current.id) === null, 5000);
+    check('restart cancels unsent jobs', !/PENDING|FAILED/.test(sql("SELECT status FROM notification WHERE status = 'PENDING' OR status = 'FAILED'")));
+    check('restart keeps responder role and connection', getMyRole(R)?.unitId === 'FIRE-01');
+  }
 
   await agent.app.stop();
   await agent.done;

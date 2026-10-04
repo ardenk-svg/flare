@@ -29,6 +29,9 @@ function fakeData(
   acknowledgements: Array<{ notificationId: string; delivered: boolean; error?: string }>,
 ): AgentDataPort {
   return {
+    recordInboundTranslation: async () => undefined,
+    getInboundTranslation: () => null,
+    prepareNotificationTranslation: async () => undefined,
     recordSharedLocation: async () => undefined,
     recordInbound: async () => {
       throw new Error("unused");
@@ -114,4 +117,23 @@ test("does not exceed the configured delivery attempt limit", async () => {
 
   assert.equal(sends, 0);
   assert.deepEqual(acknowledgements, []);
+});
+
+
+test("localized notification payload is persisted and reused after a failed send and worker restart", async () => {
+  const jobs = [{ ...job, callerLanguage: 'ja' }];
+  const acknowledgements: Array<{ notificationId: string; delivered: boolean; error?: string }> = [];
+  const data = fakeData(jobs, acknowledgements);
+  data.prepareNotificationTranslation = async input => { Object.assign(jobs[0]!, { translatedText: input.translatedText, translationLanguage: input.language }); };
+  let translations = 0;
+  const state = await stateWithRoute();
+  const translateText = async (request: { targetLanguage: string }) => { translations++; return { text: '[SIMULATION] FIRE-01 は移動中です。', sourceLanguage: 'en', targetLanguage: request.targetLanguage }; };
+  const first = new NotificationWorker({ data, state, translateText, sendRoute: async () => { throw new Error('offline'); }, pollMs: 60000, maxAttempts: 5, logger: { info() {}, error() {} } });
+  await first.start(); first.stop();
+  const sent: string[] = [];
+  const second = new NotificationWorker({ data, state, translateText, sendRoute: async (_route, text) => { sent.push(text); }, pollMs: 60000, maxAttempts: 5 });
+  await second.start(); second.stop();
+  assert.equal(translations, 1);
+  assert.deepEqual(sent, ['[SIMULATION] FIRE-01 は移動中です。']);
+  assert.deepEqual(acknowledgements.map(a => a.delivered), [false, true]);
 });

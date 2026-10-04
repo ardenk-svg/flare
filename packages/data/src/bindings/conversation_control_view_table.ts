@@ -14,4 +14,6 @@ export default __t.row({
   incidentId: __t.u64().primaryKey().name("incident_id"),
   dispatcherIdentity: __t.identity().name("dispatcher_identity"),
   updatedAt: __t.timestamp().name("updated_at"),
+  role: __t.string(),
+  unitId: __t.option(__t.string()).name("unit_id"),
 });

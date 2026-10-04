@@ -1,4 +1,4 @@
-import type { InboundTurn } from "@flare/contracts";
+import { missingIntakeFields, type InboundTurn } from "@flare/contracts";
 import { CALLER_FACT_FIELDS } from "./facts.ts";
 
 export const CHANGE_KINDS = ["TRUE", "FALSE", "UNKNOWN", "TEXT", "COUNT"] as const;
@@ -19,6 +19,7 @@ FACT FIELDS (all are caller claims, not verified observations):
 - incidentType (TEXT): brief label of what the caller reports, e.g. "smoke", "fire", "injury", "assault".
 - locationText (TEXT): the caller's typed location. Preserve building and entrance wording. Never invent coordinates, addresses, or place names.
 - peopleInvolved (COUNT): only an explicitly stated number of affected people.
+- weaponPresent (TRUE/FALSE), suspectCount (COUNT), callerStatus (TEXT), vehicleCount (COUNT), patientAge (COUNT), roadBlocked (TRUE/FALSE).
 - callerReportedConscious, callerReportedBreathing, fireOrSmoke, trappedPerson, violentThreat, injuryReported (TRUE/FALSE).
 
 CHANGE RULES:
@@ -35,8 +36,10 @@ CHANGE RULES:
 - quote: copy a short span of that message character-for-character (same spelling, punctuation and spacing). It must appear verbatim in that message.
 - For TEXT put the value in "text"; for COUNT put a non-negative integer in "count".
 
+Write summaries, incidentType and proposedQuestion in English for the console; retain verbatim evidence quotes in the original language. Preserve proper names and addresses.
+
 INTENT:
-- REPORT: new incident information.
+- REPORT: new incident information, including an answer to lastQuestion or an explicit unknown answer.
 - CORRECTION: mainly changes or withdraws something previously reported.
 - STATUS_QUERY: asks about progress/updates/ETA. changes must be [].
 - OTHER: greetings, thanks, off-topic, or nothing reportable. changes must be [].
@@ -45,12 +48,16 @@ SUMMARY: one or two plain sentences describing everything the caller has reporte
 
 unresolvedFields: fields the caller addressed but left uncertain, ambiguous, or explicitly unknown.
 
+questionField: the fact your question requests, or "" when complete. Ask one remaining important field after merging the new facts. missingFields lists fields still needed before this turn; addressedFields records prior unknown answers. Skip fields answered by this turn and prior unknown answers. Continue until all applicable fields are answered or explicitly unknown.
+
 proposedQuestion: at most one short, calm question asking for the single most useful missing fact. Ask for the building and entrance first only if locationText is unknown AND hasSharedLocation is false. If a shared pin exists, ask about another missing caller fact instead; never invent locationText from the pin. Do not ask again about something the caller just answered, including an "I don't know" answer to lastQuestion. Use "" when nothing more is needed or the intent is STATUS_QUERY or OTHER. No advice, no promises.`;
 
 /** Caller text is JSON-encoded so it cannot break out of its data position. */
 export function buildUserPrompt(turn: InboundTurn): string {
   const payload = {
     hasSharedLocation: turn.hasSharedLocation ?? false,
+    addressedFields: turn.addressedFields ?? [],
+    missingFields: missingIntakeFields(turn.currentFacts, turn.hasSharedLocation, turn.addressedFields),
     currentFacts: turn.currentFacts,
     currentSummary: turn.currentSummary,
     lastQuestion: turn.lastQuestion,
@@ -83,8 +90,9 @@ export function buildResponseSchema(turn: InboundTurn): Record<string, unknown> 
       },
       summary: { type: "string" },
       unresolvedFields: { type: "array", items: { type: "string", enum: CALLER_FACT_FIELDS } },
+      questionField: { type: "string", enum: ["", ...CALLER_FACT_FIELDS] },
       proposedQuestion: { type: "string" },
     },
-    required: ["intent", "changes", "summary", "unresolvedFields", "proposedQuestion"],
+    required: ["intent", "changes", "summary", "unresolvedFields", "proposedQuestion", "questionField"],
   };
 }

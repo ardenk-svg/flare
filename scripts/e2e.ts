@@ -302,6 +302,7 @@ function printPhoneSteps(): void {
     7. Text a new report                       it opens a brand-new incident
 
   Dispatcher ${WEB}/dispatcher   Responder ${WEB}/responder
+  Use Restart demo in the dispatcher to rehearse again without stopping.
   Logs in .flare/logs/. Press Ctrl+C to stop everything.
 `);
 }
@@ -339,7 +340,11 @@ async function up(): Promise<void> {
 
   step("Web app");
   const responderKey = randomUUID();
-  responderServer = await startDemoResponderServer({ key: responderKey, origin: WEB, authorize: (hex, unit) => {
+  responderServer = await startDemoResponderServer({ key: responderKey, origin: WEB, restart: hex => {
+    if (shuttingDown || !connections().some(c => c.hex === hex) || roleOf(hex) !== 'DISPATCHER') throw new Error('Only a connected local dispatcher can restart the demo.');
+    call('restart_demo');
+    note('Demo restarted. Same tabs and phone thread; send a new report.');
+  }, authorize: (hex, unit) => {
     if (shuttingDown || !connections().some(c => c.hex === hex)) throw new Error("Responder must be connected to this local demo.");
     const role = roleOf(hex);
     if (role === "RESPONDER" && unitOf(hex) === unit) return;
