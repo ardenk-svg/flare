@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="apps/web/public/flare-logo.svg" alt="Flare" height="72">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="apps/web/public/flare-logo-light.svg">
+    <img src="apps/web/public/flare-logo.svg" alt="Flare" height="72">
+  </picture>
 </p>
 
 <p align="center">
