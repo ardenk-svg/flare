@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { emptyFacts } from "@flare/contracts";
 import {
-  activityLabel, byPriority, categoryOf, deriveSeverity, getActivity, getKnownFacts, getRelevantMissingFacts, recommendationReasons,
+  activityLabel, byPriority, categoryOf, deriveSeverity, getActivity, getKnownFacts, getRelevantMissingFacts, hasReportedDistress, recommendationReasons,
 } from "../src/incident";
 import type { Assignment, CallerFacts, IncidentView } from "../src/types";
 
@@ -18,14 +18,63 @@ test("severity", () => {
   assert.equal(deriveSeverity(inc({ trappedPerson: true, fireOrSmoke: true })), "CRITICAL");
   assert.equal(deriveSeverity(inc({ incidentType: "robbery", violentThreat: true })), "HIGH");
   assert.equal(deriveSeverity(inc({ incidentType: "noise complaint" })), "MEDIUM");
-  assert.equal(deriveSeverity(inc({})), "LOW");
+  assert.equal(deriveSeverity(inc({})), "UNASSESSED");
 });
 
-test("queue sorts by severity, then oldest first", () => {
+test("unknown or blank incident types never imply low priority", () => {
+  for (const incidentType of [null, "", "   "]) {
+    assert.equal(deriveSeverity(inc({ incidentType, locationText: "Demo library" })), "UNASSESSED");
+  }
+  assert.equal(deriveSeverity(inc({ callerReportedBreathing: true, callerReportedConscious: true })), "UNASSESSED");
+});
+
+test("pending and failed extraction require assessment, while known danger retains priority", () => {
+  for (const state of ["PENDING", "FAILED"] as const) {
+    assert.equal(deriveSeverity(inc({ incidentType: "noise" }, { extraction: { state } })), "UNASSESSED");
+    assert.equal(deriveSeverity(inc({ callerReportedBreathing: false }, { extraction: { state } })), "CRITICAL");
+    assert.equal(deriveSeverity(inc({ injuryReported: true }, { extraction: { state } })), "HIGH");
+  }
+});
+
+test("first caller distress report is high even before extraction, without inventing medical facts", () => {
+  for (const text of ["Help im dying", "Help I'm dying", "Help I’m dying", "I am dying", "I'm going to die"]) {
+    const i = inc({}, { extraction: { state: "PENDING" }, conversation: [{ sender: "CALLER", text, at: "" }] });
+    assert.equal(deriveSeverity(i), "HIGH", text);
+    assert.equal(hasReportedDistress(i), true, text);
+    assert.deepEqual(i.facts, emptyFacts());
+    assert.deepEqual(i.recommendedServices, []);
+  }
+  assert.equal(deriveSeverity(inc({ callerStatus: "dying" })), "HIGH");
+  assert.equal(deriveSeverity(inc({ callerReportedBreathing: false, callerStatus: "dying" })), "CRITICAL");
+});
+
+test("caller translation flags distress and subsequent location replies do not hide it", () => {
+  const i = inc({ incidentType: "medical" }, { conversation: [
+    { sender: "CALLER", text: "Ayuda, me estoy muriendo", translatedText: "Help, I'm dying", at: "2026-10-03T20:00:00Z" },
+    { sender: "CALLER", text: "Demo library", at: "2026-10-03T20:00:02Z" },
+  ] });
+  assert.equal(hasReportedDistress(i), true);
+  assert.equal(deriveSeverity(i), "HIGH");
+});
+
+test("distress flags use caller statements, not denials, summaries, or operator echoes", () => {
+  for (const text of ["I'm not dying", "I am no longer dying", "My phone is dying"]) {
+    assert.equal(hasReportedDistress(inc({}, { conversation: [{ sender: "CALLER", text, at: "" }] })), false, text);
+  }
+  for (const sender of ["AGENT", "DISPATCHER", "RESPONDER"] as const) {
+    assert.equal(hasReportedDistress(inc({}, { summary: "I'm dying", conversation: [{ sender, text: "I'm dying", at: "" }] })), false);
+  }
+  assert.equal(hasReportedDistress(inc({ callerStatus: "not dying" })), false);
+});
+
+test("queue sorts danger before unassessed reports, then medium, with oldest first within each", () => {
   const a = inc({ incidentType: "noise" }, { id: "a", createdAt: "2026-10-03T19:00:00Z" });
   const b = inc({ violentThreat: true }, { id: "b", createdAt: "2026-10-03T20:00:00Z" });
   const c = inc({ violentThreat: true }, { id: "c", createdAt: "2026-10-03T19:30:00Z" });
-  assert.deepEqual([a, b, c].sort(byPriority).map((i) => i.id), ["c", "b", "a"]);
+  const d = inc({}, { id: "d", createdAt: "2026-10-03T21:00:00Z" });
+  const e = inc({}, { id: "e", createdAt: "2026-10-03T20:30:00Z" });
+  const f = inc({ callerReportedBreathing: false }, { id: "f", createdAt: "2026-10-03T22:00:00Z" });
+  assert.deepEqual([a, b, c, d, e, f].sort(byPriority).map((i) => i.id), ["f", "c", "b", "e", "d", "a"]);
 });
 
 test("robbery asks for robbery facts, not fire or medical ones", () => {

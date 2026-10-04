@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSnapshot } from "../data";
 import { ExtractionNotice, FixtureControls, Icon, StaleBanner } from "../components";
 import {
-  ActivityFeed, Assignments, CallerConversation, IncidentFacts, IncidentHeader, IncidentListItem, IncidentLocation,
+  ActivityFeed, Assignments, CallerConversation, CallerDistressNotice, IncidentFacts, IncidentHeader, IncidentListItem, IncidentLocation,
   IncidentSummary, isDone, RecommendedResponse,
 } from "../console";
 import { byPriority } from "../incident";
@@ -76,6 +76,7 @@ export default function Dispatcher() {
           {!incident ? <div className="empty">{incidents.length ? "No active incidents. Resolved and closed incidents are hidden." : "No active incidents. Waiting for a caller to text Flare."}</div> : (
             <>
               <IncidentHeader incident={incident} />
+              <CallerDistressNotice incident={incident} />
               {incident.needsReview && (
                 <div className="notice err" role="status">
                   <Icon name="alert" />
