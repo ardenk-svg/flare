@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "smoke:live": "tsx scripts/smoke-live.ts",
-    "seed:demo": "tsx scripts/seed-demo.ts"
+    "seed:demo": "tsx scripts/seed-demo.ts",
+    "test": "tsx --test scripts/incident.test.ts"
   },
   "dependencies": {
     "@flare/contracts": "file:../../packages/contracts",

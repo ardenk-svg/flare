@@ -1,7 +1,7 @@
 // FlareClient backed by Person 3's @flare/data adapter (SpacetimeDB).
 // The browser holds only its own identity token; roles are granted by the operator on the backend.
 import {
-  advanceAssignment, confirmDispatchAndAssign, connectFlare, FlareOpError, getMyRole,
+  advanceAssignment, closeIncident, confirmDispatchAndAssign, connectFlare, FlareOpError, getMyRole,
   listAssignments, listIncidents, listUnits, resolveIncident, type FlareConnection,
 } from "@flare/data";
 import type { Incident } from "@flare/contracts";
@@ -46,7 +46,7 @@ function toView(i: Incident): IncidentView {
     corrections: i.lastCorrections,
     recommendedServices: i.recommendedServices, recommendationReason: i.recommendationReason,
     ruleIds: i.recommendationRuleIds, confirmedServices: i.confirmedServices,
-    needsReview: i.needsReview,
+    needsReview: i.needsReview, closeReason: i.closeReason,
     extraction: toExtraction(i),
     createdAt: i.createdAt, updatedAt: i.updatedAt,
   };
@@ -132,6 +132,7 @@ export function createLiveClient(cfg: LiveConfig): LiveClient {
     confirmDispatchAndAssign: (req) => run((c) => confirmDispatchAndAssign(c.conn, req)),
     advanceAssignment: ({ assignmentId, next }) => run((c) => advanceAssignment(c.conn, { assignmentId, nextStatus: next })),
     resolveIncident: (req) => run((c) => resolveIncident(c.conn, req)),
+    closeIncident: (req) => run((c) => closeIncident(c.conn, req)),
     close() {
       closed = true;
       clearTimeout(retryTimer);

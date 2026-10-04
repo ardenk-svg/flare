@@ -7,7 +7,7 @@ import type {
 } from "../types";
 import { incidents as seedIncidents, units as seedUnits } from "../fixture";
 
-const KEY = "flare-fixture-v1";
+const KEY = "flare-fixture-v2";
 const LATENCY_MS = 350;
 
 interface Shared { incidents: IncidentView[]; units: Unit[]; assignments: Assignment[]; rigConflict: boolean }
@@ -142,6 +142,19 @@ export function createFixtureClient(identity: Identity): FixtureClient {
       if (inc.status !== "DISPATCHED" || mine.length === 0 || mine.some((a) => a.status !== "COMPLETED"))
         return fail("NOT_COMPLETE", "Incident must be dispatched with every assignment completed.");
       shared.incidents = shared.incidents.map((i) => (i.id === incidentId ? { ...i, status: "RESOLVED", updatedAt: now() } : i));
+      persist();
+      return delay<OpResult>({ ok: true });
+    },
+
+    async closeIncident({ incidentId, reason }) {
+      const g = guard("dispatcher"); if (g) return delay(g);
+      shared = load();
+      const inc = shared.incidents.find((i) => i.id === incidentId);
+      if (!inc) return fail("NOT_FOUND", "Incident not found.");
+      if (inc.status !== "COLLECTING" && inc.status !== "READY_FOR_REVIEW") return fail("NOT_CLOSABLE", inc.status);
+      if (shared.assignments.some((a) => a.incidentId === incidentId)) return fail("HAS_ASSIGNMENTS", "Incident has assignments.");
+      if (!reason.trim()) return fail("REASON_REQUIRED", "A reason is required.");
+      shared.incidents = shared.incidents.map((i) => (i.id === incidentId ? { ...i, status: "CLOSED", closeReason: reason.trim(), updatedAt: now() } : i));
       persist();
       return delay<OpResult>({ ok: true });
     },

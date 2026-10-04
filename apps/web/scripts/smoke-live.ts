@@ -8,6 +8,7 @@ import {
   recordExtractionFailure, recordInbound, type FlareConnection,
 } from "@flare/data";
 import { createLiveClient, type LiveClient, type TokenStore } from "../src/data/liveClient";
+import { deriveSeverity, getActivity, getRelevantMissingFacts, recommendationReasons } from "../src/incident";
 import type { OpResult, Snapshot } from "../src/types";
 
 const URI = process.env.SPACETIMEDB_URI ?? "ws://127.0.0.1:3000";
@@ -118,6 +119,9 @@ async function main() {
   const incidentId = d().incidents[0]?.id ?? fatal("no incident on dispatcher");
   const inc = () => d().incidents.find((i) => i.id === incidentId)!;
   check("incident is COLLECTING with FIRE recommended, nothing confirmed", inc().status === "COLLECTING" && inc().recommendedServices.join() === "FIRE" && inc().confirmedServices.length === 0);
+  check("console panels: HIGH severity, readable reason, location still needed",
+    deriveSeverity(inc()) === "HIGH" && recommendationReasons(inc())[0]?.reasons.join() === "Fire or smoke reported" &&
+    getRelevantMissingFacts(inc())[0]?.key === "locationText");
   check("evidence quote reaches dispatcher", inc().evidence.some((e) => e.field === "fireOrSmoke" && e.quote === "I see smoke outside"));
   check("unassigned responder sees no incident", r().incidents.length === 0);
 
@@ -155,6 +159,8 @@ async function main() {
   await observe("dispatcher sees ACCEPTED without refresh", () => dAssign() === "ACCEPTED");
   check("responder advances to EN_ROUTE", (await responder.client.advanceAssignment({ assignmentId, next: "EN_ROUTE" })).ok);
   await observe("dispatcher sees EN_ROUTE without refresh", () => dAssign() === "EN_ROUTE");
+  await observe("live activity shows FIRE-01 en route from pushed state", () =>
+    getActivity(inc(), d().assignments).events[0]?.kind === "UNIT_EN_ROUTE");
   await observe("EN_ROUTE notification committed for the agent", () => listPendingNotifications(A).some((n) => n.kind === "ASSIGNMENT_EN_ROUTE" && n.conversationKey === KEY));
 
   // ---- 7. Disconnect blocks mutations; reconnect with the same token restores identity and state ----
@@ -187,6 +193,15 @@ async function main() {
   check("second case carries no facts or evidence from the first", caseB.facts.fireOrSmoke === null && caseB.facts.locationText === null && caseB.evidence.every((e) => e.messageId === "b1"));
   check("second case is a later intake case", (listIncidents(A).find((i) => i.id === caseB.id)?.caseEpoch ?? 0) > (listIncidents(A).find((i) => i.id === incidentId)?.caseEpoch ?? 0));
   check("first incident stays RESOLVED in history", inc().status === "RESOLVED");
+
+  // ---- 9. Close without dispatch ----
+  rejected("responder cannot close", await R.closeIncident({ incidentId: caseB.id, reason: "Test or accidental text" }), "UNAUTHORIZED");
+  rejected("close needs a reason", await dispatcher.client.closeIncident({ incidentId: caseB.id, reason: " " }), "REASON_REQUIRED");
+  const closed = await dispatcher.client.closeIncident({ incidentId: caseB.id, reason: "Test or accidental text" });
+  check("dispatcher closes without dispatch", closed.ok, closed.ok ? "" : `${closed.code}: ${closed.message}`);
+  const caseBNow = () => d().incidents.find((i) => i.id === caseB.id);
+  await observe("CLOSED with reason pushed to dispatcher", () => caseBNow()?.status === "CLOSED" && caseBNow()?.closeReason === "Test or accidental text");
+  check("activity ends with closed without dispatch", getActivity(caseBNow()!, d().assignments).events[0]?.kind === "INCIDENT_CLOSED");
 
   dispatcher.client.close();
   again.client.close();
