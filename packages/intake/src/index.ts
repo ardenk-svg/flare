@@ -29,3 +29,5 @@ export {
   type ExtractionError,
 } from "./gemini.ts";
 export { validateModelOutput } from "./validate.ts";
+
+export { translateText, createTranslator, type TranslateText, type Translation } from "./translate.ts";

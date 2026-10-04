@@ -10,13 +10,9 @@ import {
   type Infer as __Infer,
 } from "spacetimedb";
 
-export default __t.row({
-  key: __t.string().primaryKey(),
-  incidentId: __t.u64().name("incident_id"),
-  sender: __t.string(),
-  text: __t.string(),
-  at: __t.timestamp(),
-  translatedText: __t.option(__t.string()).name("translated_text"),
-  language: __t.option(__t.string()),
-  delivery: __t.option(__t.string()),
-});
+export default {
+  conversationKey: __t.string(),
+  messageId: __t.string(),
+  language: __t.string(),
+  translatedText: __t.string(),
+};

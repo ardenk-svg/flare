@@ -16,6 +16,19 @@ export type AgentConversation = __Infer<typeof AgentConversation>;
 export const AgentInbound = __t.object("AgentInbound", {});
 export type AgentInbound = __Infer<typeof AgentInbound>;
 
+export const AgentMessageTranslation = __t.object("AgentMessageTranslation", {});
+export type AgentMessageTranslation = __Infer<typeof AgentMessageTranslation>;
+
+export const AgentMessageTranslationRow = __t.object("AgentMessageTranslationRow", {
+  key: __t.string(),
+  conversationKey: __t.string(),
+  caseEpoch: __t.u32(),
+  messageId: __t.string(),
+  language: __t.string(),
+  translatedText: __t.string(),
+});
+export type AgentMessageTranslationRow = __Infer<typeof AgentMessageTranslationRow>;
+
 export const AgentNotification = __t.object("AgentNotification", {});
 export type AgentNotification = __Infer<typeof AgentNotification>;
 
@@ -90,6 +103,15 @@ export const ConversationControl = __t.object("ConversationControl", {
 });
 export type ConversationControl = __Infer<typeof ConversationControl>;
 
+export const ConversationControlRow = __t.object("ConversationControlRow", {
+  incidentId: __t.u64(),
+  dispatcherIdentity: __t.identity(),
+  updatedAt: __t.timestamp(),
+  role: __t.string(),
+  unitId: __t.option(__t.string()),
+});
+export type ConversationControlRow = __Infer<typeof ConversationControlRow>;
+
 export const ConversationControlView = __t.object("ConversationControlView", {});
 export type ConversationControlView = __Infer<typeof ConversationControlView>;
 
@@ -99,6 +121,8 @@ export const ConversationMessageRow = __t.object("ConversationMessageRow", {
   sender: __t.string(),
   text: __t.string(),
   at: __t.timestamp(),
+  translatedText: __t.option(__t.string()),
+  language: __t.option(__t.string()),
   delivery: __t.option(__t.string()),
 });
 export type ConversationMessageRow = __Infer<typeof ConversationMessageRow>;
@@ -214,6 +238,15 @@ export type IncidentEventView = __Infer<typeof IncidentEventView>;
 export const IncidentView = __t.object("IncidentView", {});
 export type IncidentView = __Infer<typeof IncidentView>;
 
+export const MessageTranslation = __t.object("MessageTranslation", {
+  key: __t.string(),
+  conversationId: __t.u64(),
+  caseEpoch: __t.u32(),
+  language: __t.string(),
+  translatedText: __t.string(),
+});
+export type MessageTranslation = __Infer<typeof MessageTranslation>;
+
 export const MyRole = __t.object("MyRole", {});
 export type MyRole = __Infer<typeof MyRole>;
 
@@ -256,6 +289,9 @@ export const PendingNotificationRow = __t.object("PendingNotificationRow", {
   assignmentId: __t.option(__t.u64()),
   kind: __t.string(),
   text: __t.string(),
+  callerLanguage: __t.string(),
+  translatedText: __t.option(__t.string()),
+  translationLanguage: __t.option(__t.string()),
   eventAssignmentStatus: __t.option(__t.string()),
   eventAt: __t.timestamp(),
   status: __t.string(),

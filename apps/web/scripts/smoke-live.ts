@@ -172,7 +172,7 @@ async function main() {
     const kinds = getActivity(inc(), d().assignments).events.map((e) => e.kind);
     return kinds[0] === "UNIT_EN_ROUTE" && kinds.includes("UNIT_ACCEPTED") && kinds.includes("DISPATCH_CONFIRMED");
   });
-  check("assigned responder sees the incident but no transcript or activity log", r().incidents.length === 1 && !r().incidents[0].conversation && !r().incidents[0].events);
+  check("assigned responder sees its incident transcript and activity log", r().incidents.length === 1 && !!r().incidents[0].conversation?.length && !!r().incidents[0].events?.length);
   await observe("EN_ROUTE notification committed for the agent", () => listPendingNotifications(A).some((n) => n.kind === "ASSIGNMENT_EN_ROUTE" && n.conversationKey === KEY));
 
   // ---- 7. Disconnect blocks mutations; reconnect with the same token restores identity and state ----

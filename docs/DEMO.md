@@ -58,3 +58,10 @@ Person 2 evidence, checked separately before the sequence above:
 - Demo rules are synthetic, not triage guidance.
 - A crash between sending a message and acknowledging it can deliver the message twice. Delivery is not exactly-once.
 - Fixture and offline runs are labelled as such and do not demonstrate live integrations.
+
+
+## Repeat and multilingual rehearsals
+
+Start the local demo once with `npm run e2e -- --keep`. Use Restart demo in the dispatcher between runs, then send a new report in the same phone thread. Keep the same dispatcher/responder tabs; use the unit dropdown for Fire/EMS/Police. Restart ends existing cases, frees units and cancels unsent jobs while preserving identities and history. Request Find My sharing again for a new case rather than reusing a previous pin.
+
+Try a Spanish report. Both operator views show the original and English translation; Gemini questions and human/unit updates return in Spanish. Take over from an assigned responder to show that its chat ownership pauses automated questions. Return to agent to continue intake on the next caller turn. Complete the applicable caller-fact fields (or answer explicitly unknown) to demonstrate the normal question exit condition.

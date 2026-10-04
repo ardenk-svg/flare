@@ -33,7 +33,7 @@ export interface Expectation {
   messageNotMatch?: string;
 }
 
-const RESULT_KEYS = ["corrections", "evidence", "intent", "patch", "proposedQuestion", "summary", "unresolvedFields"];
+const RESULT_KEYS = ["corrections", "evidence", "intent", "patch", "proposedQuestion", "questionField", "summary", "unresolvedFields"];
 
 function sameSet(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && [...a].sort().join("|") === [...b].sort().join("|");

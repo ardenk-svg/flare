@@ -1,10 +1,11 @@
+import { useState } from "react";
 import { useClient, useSnapshot } from "../data";
 import {
   ActionError, AssignmentStatusChip, AssignmentStepper, ExtractionBadge, ExtractionNotice, FixtureControls, Icon,
   LocationLine, Pending, RelativeTime, StaleBanner, useAction,
 } from "../components";
 import { ASSIGNMENT_ORDER, type AssignmentStatus, type CallerFacts } from "../types";
-import { ServiceTag } from "../console";
+import { CallerConversation, IncidentFacts, ActivityFeed, ServiceTag } from "../console";
 
 const NEXT_ACTION: Partial<Record<AssignmentStatus, string>> = {
   ACCEPTED: "Accept assignment",
@@ -27,9 +28,12 @@ export default function Responder() {
   const client = useClient();
   const { identity, assignments, incidents, connection } = useSnapshot();
   const act = useAction();
+  const [selectedId, setSelectedId] = useState("");
   const offline = connection !== "connected";
-  const assignment = assignments.find((a) => a.unitId === identity.unitId && a.status !== "COMPLETED")
-    ?? assignments.find((a) => a.unitId === identity.unitId);
+  const mine = assignments.filter(a => a.unitId === identity.unitId);
+  const open = mine.filter(a => a.status !== 'COMPLETED');
+  const choices = open.length ? open : mine.slice(-1);
+  const assignment = choices.find(a => a.id === selectedId) ?? choices[0];
   const incident = incidents.find((i) => i.id === assignment?.incidentId);
 
   if (!assignment || !incident)
@@ -58,6 +62,7 @@ export default function Responder() {
     <div className="page page-narrow">
       <StaleBanner />
       <div className={`stack ${offline ? "stale" : ""}`}>
+        {choices.length > 1 && <label className="sublabel">Your assigned incidents<select value={assignment.id} onChange={e => setSelectedId(e.target.value)}>{choices.map(a => <option key={a.id} value={a.id}>Incident #{a.incidentId} · {a.status.toLowerCase().replaceAll('_', ' ')}</option>)}</select></label>}
         <section className={`card mission ${done ? "done" : ""}`} aria-label="Your assignment">
           <div className="mission-head">
             <span className="mono">{assignment.unitId}</span>
@@ -70,7 +75,7 @@ export default function Responder() {
               {act.pending ? <Pending label="Waiting for the backend…" /> : NEXT_ACTION[next]}
             </button>
           ) : (
-            <p className="notice"><Icon name="check" /><span>Assignment complete. The dispatcher will resolve the incident.</span></p>
+            <p className="notice"><Icon name="check" /><span>{incident.status === "RESOLVED" ? "Incident resolved. Ready for your next assignment." : "Assignment complete. The dispatcher will resolve the incident."}</span></p>
           )}
           <ActionError message={act.error} />
           <AssignmentStepper status={assignment.status} />
@@ -111,6 +116,9 @@ export default function Responder() {
           )}
           {incident.summary && <p className="reason">{incident.summary}</p>}
         </section>
+        <CallerConversation key={incident.id} incident={incident} />
+        <IncidentFacts incident={incident} />
+        <ActivityFeed incident={incident} assignments={assignments} />
         <p className="muted small mono">Incident #{incident.id}</p>
       </div>
       <FixtureControls incidentId={incident.id} />

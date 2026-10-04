@@ -12,11 +12,9 @@ import {
 
 export default __t.row({
   key: __t.string().primaryKey(),
-  incidentId: __t.u64().name("incident_id"),
-  sender: __t.string(),
-  text: __t.string(),
-  at: __t.timestamp(),
-  translatedText: __t.option(__t.string()).name("translated_text"),
-  language: __t.option(__t.string()),
-  delivery: __t.option(__t.string()),
+  conversationKey: __t.string().name("conversation_key"),
+  caseEpoch: __t.u32().name("case_epoch"),
+  messageId: __t.string().name("message_id"),
+  language: __t.string(),
+  translatedText: __t.string().name("translated_text"),
 });

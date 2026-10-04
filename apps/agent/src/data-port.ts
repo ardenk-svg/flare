@@ -10,6 +10,7 @@ import type {
 } from "@flare/contracts";
 import {
   ackNotification,
+  recordInboundTranslation, getInboundTranslation, prepareNotificationTranslation,
   applyIntakePatch,
   completeInboundWithoutPatch,
   getConversationContext,
@@ -40,6 +41,9 @@ export const toProviderRoute = (route: ConversationRoute): ProviderRoute => ({
 export type ExtractionFailure = Extract<ExtractionOutcome, { ok: false }>['error'];
 
 export interface AgentDataPort {
+  recordInboundTranslation(input: { conversationKey: string; messageId: string; language: string; translatedText: string }): Promise<void>;
+  getInboundTranslation(conversationKey: string, messageId: string): { language: string; translatedText: string } | null;
+  prepareNotificationTranslation(input: { notificationId: string; language: string; translatedText: string }): Promise<void>;
   recordSharedLocation(input: Parameters<typeof recordSharedLocation>[1]): Promise<void>;
   recordInbound(input: {
     provider: string;
@@ -69,6 +73,8 @@ export interface AgentDataPort {
   recordSentQuestion(input: {
     conversationKey: string;
     question: string;
+    translatedText?: string;
+    language?: string;
     delivered: boolean;
     error?: string;
   }): Promise<void>;
@@ -86,6 +92,9 @@ export interface AgentDataPort {
 export function createAgentDataPort(connection: FlareConnection): AgentDataPort {
   const { conn } = connection;
   return {
+    recordInboundTranslation: input => recordInboundTranslation(conn, input),
+    getInboundTranslation: (key, id) => getInboundTranslation(conn, key, id),
+    prepareNotificationTranslation: input => prepareNotificationTranslation(conn, input),
     recordSharedLocation: (input) => recordSharedLocation(conn, input),
     recordInbound: (input) => recordInbound(conn, input),
     getConversationContext: (conversationKey) => getConversationContext(conn, conversationKey),

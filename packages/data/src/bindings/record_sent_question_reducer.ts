@@ -15,4 +15,6 @@ export default {
   question: __t.string(),
   delivered: __t.bool(),
   error: __t.option(__t.string()),
+  translatedText: __t.option(__t.string()),
+  language: __t.option(__t.string()),
 };

@@ -5,6 +5,7 @@ import { emptyFacts } from '@flare/contracts';
 import type { CallerFactPatch, Evidence, ExtractionResult, Intent, Recommendation } from '@flare/contracts';
 import {
   ackNotification,
+  recordInboundTranslation, prepareNotificationTranslation,
   advanceAssignment,
   applyIntakePatch,
   completeInboundWithoutPatch,
@@ -33,7 +34,9 @@ import {
 
 const URI = process.env.SPACETIMEDB_URI ?? 'ws://127.0.0.1:3000';
 const DB = process.env.FLARE_DB ?? 'flare-dev';
-const SERVER = 'local'; // never run this against the shared integration database
+const endpoint = new URL(URI);
+if (!['127.0.0.1', 'localhost', '[::1]'].includes(endpoint.hostname)) throw new Error('Adapter checks reset data; use a local database only.');
+const SERVER = `http://${endpoint.host}`;
 
 let failures = 0;
 let checks = 0;
@@ -418,7 +421,7 @@ async function main() {
   const tB = listConversation(dispatcher.conn, caseB.id);
   check('transcript is case-isolated', tB.length === 1 && tB[0].text.startsWith('Simulation: someone collapsed') && !tA.some(m => m.text.startsWith('Simulation: someone collapsed')));
   check('shared pin shows as a caller transcript line', listConversation(dispatcher.conn, pinned.id).some(m => m.sender === 'CALLER' && m.text === '[Shared location: Demo Diag]'));
-  check('responder and agent are denied transcript and events', [...fire.conn.db.incidentConversationView.iter()].length === 0 && [...fire.conn.db.incidentEventView.iter()].length === 0 && [...A.db.incidentConversationView.iter()].length === 0 && [...outsider.conn.db.incidentEventView.iter()].length === 0);
+  check('responders see only assigned case transcripts; agents and outsiders see none', [...fire.conn.db.incidentConversationView.iter()].every(m => listAssignments(fire.conn).some(a => a.incidentId === m.incidentId.toString())) && [...A.db.incidentConversationView.iter()].length === 0 && [...outsider.conn.db.incidentEventView.iter()].length === 0);
 
   // --- Activity log (#29) ---
   const kindsA = listIncidentEvents(dispatcher.conn, inc1.id).map(e => e.kind);
@@ -551,6 +554,33 @@ async function main() {
   const visible = (c: FlareConnection) =>
     JSON.stringify([...c.conn.db.incidentView.iter(), ...c.conn.db.assignmentView.iter(), ...c.conn.db.unitView.iter(), ...c.conn.db.myRole.iter(), ...c.conn.db.agentConversation.iter(), ...c.conn.db.agentInbound.iter(), ...c.conn.db.agentNotification.iter(), ...c.conn.db.incidentConversationView.iter(), ...c.conn.db.incidentEventView.iter()], (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
   check('route fields invisible to dispatcher and responder', [dispatcher, fire, ems, outsider].every(c => !visible(c).includes('space-check') && !visible(c).includes('check-line')));
+
+  // --- Translation persistence and per-case language isolation ---
+  const translationKey = 'check:translation';
+  const spanish = 'Hay humo en la biblioteca.';
+  await recordInbound(A, { provider: 'check', conversationKey: translationKey, route: route(translationKey), messages: [msg('es-1', spanish)] });
+  await rejects('responder cannot write machine translations', recordInboundTranslation(fire.conn, { conversationKey: translationKey, messageId: 'es-1', language: 'es', translatedText: 'There is smoke in the library.' }), 'UNAUTHORIZED');
+  await recordInboundTranslation(A, { conversationKey: translationKey, messageId: 'es-1', language: 'es', translatedText: 'There is smoke in the library.' });
+  await applyIntakePatch(A, { conversationKey: translationKey, expectedRevision: 0, sourceMessageIds: ['es-1'], result: { ...result('REPORT', { fireOrSmoke: true, incidentType: 'smoke', locationText: 'biblioteca' }, ['fireOrSmoke', 'incidentType', 'locationText'].map(field => ({ field: field as keyof CallerFactPatch, messageId: 'es-1', quote: spanish })), 'Smoke at the library.'), unresolvedFields: ['trappedPerson'] }, recommendation: FIRE_REC });
+  const translatedInc = getConversationContext(A, translationKey)!.activeIncident!;
+  await recordSentQuestion(A, { conversationKey: translationKey, question: 'Is anyone injured?', delivered: true, language: 'es', translatedText: '¿Hay alguien herido?' });
+  await waitFor('translation arrives in dispatcher transcript', () => listConversation(dispatcher.conn, translatedInc.id).some(m => m.sender === 'CALLER' && m.translatedText === 'There is smoke in the library.'));
+  check('translation storage view remains agent-private', [dispatcher, fire, ems, outsider].every(c => [...c.conn.db.agentMessageTranslation.iter()].length === 0));
+  check('translated transcript retains original text and language', listConversation(dispatcher.conn, translatedInc.id).some(m => m.text === spanish && m.language === 'es'));
+  check('question transcript stores both authored and delivered language', listConversation(dispatcher.conn, translatedInc.id).some(m => m.text === 'Is anyone injured?' && m.translatedText === '¿Hay alguien herido?'));
+  await recordInbound(A, { provider: 'check', conversationKey: translationKey, route: route(translationKey), messages: [msg('es-2', 'No hay heridos.')] });
+  await applyIntakePatch(A, { conversationKey: translationKey, expectedRevision: 1, sourceMessageIds: ['es-2'], result: result('REPORT', { injuryReported: false }, [{ field: 'injuryReported', messageId: 'es-2', quote: 'No hay heridos.' }], 'Smoke; nobody injured.'), recommendation: FIRE_REC });
+  check('previous unknown answers persist across later turns', getConversationContext(A, translationKey)!.activeIncident!.unresolvedFields.includes('trappedPerson'));
+  await recordInbound(A, { provider: 'check', conversationKey: translationKey, route: route(translationKey), messages: [msg('es-status', 'Actualización?')] });
+  await completeInboundWithoutPatch(A, { conversationKey: translationKey, messageIds: ['es-status'], intent: 'STATUS_QUERY', replyText: '[SIMULATION] No mock unit assigned yet.' });
+  const translatedJob = listPendingNotifications(A).find(n => n.incidentId === translatedInc.id)!;
+  check('notifications inherit this case language', translatedJob.callerLanguage === 'es');
+  await prepareNotificationTranslation(A, { notificationId: translatedJob.id, language: 'es', translatedText: '[SIMULATION] No hay unidad asignada.' });
+  await ackNotification(A, { notificationId: translatedJob.id, delivered: true });
+  await waitFor('localized notification is projected', () => listConversation(dispatcher.conn, translatedInc.id).some(m => m.translatedText === '[SIMULATION] No hay unidad asignada.'));
+  await closeIncident(dispatcher.conn, { incidentId: translatedInc.id, reason: 'Translation test complete' });
+  check('later case does not inherit the prior caller language', getConversationContext(A, translationKey)!.callerLanguage === 'en');
+  await rejects('late translation cannot cross a case boundary', recordInboundTranslation(A, { conversationKey: translationKey, messageId: 'es-1', language: 'es', translatedText: 'Stale' }), 'UNKNOWN_MESSAGE');
 
   // --- Restart recovery: pending intake and unacknowledged notifications ---
   await recordInbound(A, { provider: 'check', conversationKey: KEY2, route: route(KEY2), messages: [msg('t2', 'Still waiting here.')] });

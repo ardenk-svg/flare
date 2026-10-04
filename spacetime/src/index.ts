@@ -254,6 +254,14 @@ const conversationControl = table({ name: 'conversation_control' }, {
   updatedAt: t.timestamp(),
 });
 
+const messageTranslation = table({ name: 'message_translation' }, {
+  key: t.string().primaryKey(),
+  conversationId: t.u64().index('btree'),
+  caseEpoch: t.u32(),
+  language: t.string(),
+  translatedText: t.string(),
+});
+
 const spacetimedb = schema({
   roleGrant,
   unit,
@@ -265,6 +273,7 @@ const spacetimedb = schema({
   outboundMessage,
   incidentEvent,
   conversationControl,
+  messageTranslation,
 });
 export default spacetimedb;
 
@@ -525,6 +534,7 @@ export const revokeRole = spacetimedb.reducer({ identityHex: t.string() }, (ctx,
 /** Clears demo incidents, conversations, messages and notifications; reseeds units. Keeps role grants. */
 export const resetDemo = spacetimedb.reducer(ctx => {
   requireRole(ctx, 'ADMIN');
+  for (const row of [...ctx.db.messageTranslation.iter()]) ctx.db.messageTranslation.key.delete(row.key);
   for (const row of [...ctx.db.notification.iter()]) ctx.db.notification.id.delete(row.id);
   for (const row of [...ctx.db.outboundMessage.iter()]) ctx.db.outboundMessage.id.delete(row.id);
   for (const row of [...ctx.db.incidentEvent.iter()]) ctx.db.incidentEvent.id.delete(row.id);
@@ -752,7 +762,7 @@ export const applyIntakePatch = spacetimedb.reducer(
       evidence,
       summary: args.summary,
       intakeRevision: nextRevision,
-      unresolvedFields: args.unresolvedFields,
+      unresolvedFields: [...new Set([...inc.unresolvedFields, ...args.unresolvedFields])].filter(f => facts[f] === undefined),
       lastCorrections: args.corrections,
       recommendedServices: args.recommendedServices,
       recommendationRuleIds: args.recommendationRuleIds,
@@ -803,9 +813,38 @@ export const completeInboundWithoutPatch = spacetimedb.reducer(
   }
 );
 
+function validateTranslation(language: string, text: string) {
+  if (!/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(language) || !text.trim() || text.length > 12000) throw new SenderError('INVALID_TRANSLATION');
+}
+
+export const recordInboundTranslation = spacetimedb.reducer(
+  { conversationKey: t.string(), messageId: t.string(), language: t.string(), translatedText: t.string() },
+  (ctx, { conversationKey, messageId, language, translatedText }) => {
+    requireRole(ctx, 'AGENT'); validateTranslation(language, translatedText);
+    const convo = requireConversation(ctx, conversationKey);
+    const message = [...ctx.db.inboundMessage.conversationId.filter(convo.id)].find(m => m.messageId === messageId && m.caseEpoch === convo.caseEpoch);
+    if (!message) throw new SenderError('UNKNOWN_MESSAGE');
+    const key = `in:${message.id}`;
+    if (!ctx.db.messageTranslation.key.find(key)) ctx.db.messageTranslation.insert({ key, conversationId: convo.id, caseEpoch: message.caseEpoch, language, translatedText });
+  }
+);
+
+export const prepareNotificationTranslation = spacetimedb.reducer(
+  { notificationId: t.u64(), language: t.string(), translatedText: t.string() },
+  (ctx, { notificationId, language, translatedText }) => {
+    requireRole(ctx, 'AGENT'); validateTranslation(language, translatedText);
+    const job = ctx.db.notification.id.find(notificationId);
+    if (!job) throw new SenderError('NOT_FOUND: notification');
+    const inc = job.incidentId === undefined ? undefined : ctx.db.incident.id.find(job.incidentId);
+    const epoch = inc?.caseEpoch ?? ctx.db.conversation.id.find(job.conversationId)?.caseEpoch ?? 1;
+    const key = `notification:${notificationId}`;
+    if (!ctx.db.messageTranslation.key.find(key)) ctx.db.messageTranslation.insert({ key, conversationId: job.conversationId, caseEpoch: epoch, language, translatedText });
+  }
+);
+
 export const recordSentQuestion = spacetimedb.reducer(
-  { conversationKey: t.string(), question: t.string(), delivered: t.bool(), error: t.option(t.string()) },
-  (ctx, { conversationKey, question, delivered, error }) => {
+  { conversationKey: t.string(), question: t.string(), delivered: t.bool(), error: t.option(t.string()), translatedText: t.option(t.string()), language: t.option(t.string()) },
+  (ctx, { conversationKey, question, delivered, error, translatedText, language }) => {
     requireRole(ctx, 'AGENT');
     const convo = requireConversation(ctx, conversationKey);
     ctx.db.conversation.id.update({
@@ -816,7 +855,7 @@ export const recordSentQuestion = spacetimedb.reducer(
       lastQuestionAt: ctx.timestamp,
       updatedAt: ctx.timestamp,
     });
-    ctx.db.outboundMessage.insert({
+    const row = ctx.db.outboundMessage.insert({
       id: 0n,
       conversationId: convo.id,
       caseEpoch: convo.caseEpoch,
@@ -827,6 +866,10 @@ export const recordSentQuestion = spacetimedb.reducer(
       delivery: delivered ? 'SENT' : 'FAILED',
       at: ctx.timestamp,
     });
+    if (translatedText && language) {
+      validateTranslation(language, translatedText);
+      ctx.db.messageTranslation.insert({ key: `out:${row.id}`, conversationId: convo.id, caseEpoch: convo.caseEpoch, language, translatedText });
+    }
   }
 );
 
@@ -878,21 +921,30 @@ function requireOpenIncident(ctx: Ctx, incidentId: bigint) {
   return inc;
 }
 
+function requireConversationOperator(ctx: Ctx, incidentId: bigint) {
+  const grant = requireRole(ctx, 'DISPATCHER', 'RESPONDER');
+  const inc = requireOpenIncident(ctx, incidentId);
+  if (grant.role === 'RESPONDER' && (inc.status !== 'DISPATCHED' || ![...ctx.db.assignment.incidentId.filter(incidentId)].some(a => a.unitId === grant.unitId && a.status !== 'COMPLETED'))) {
+    throw new SenderError('UNAUTHORIZED: requires an active assignment to your unit');
+  }
+  return grant;
+}
+
 export const takeOverConversation = spacetimedb.reducer({ incidentId: t.u64() }, (ctx, { incidentId }) => {
-  requireRole(ctx, 'DISPATCHER');
-  requireOpenIncident(ctx, incidentId);
+  requireConversationOperator(ctx, incidentId);
   const current = ctx.db.conversationControl.incidentId.find(incidentId);
   if (current) {
-    if (!current.dispatcherIdentity.isEqual(ctx.sender)) throw new SenderError('TAKEN_OVER: another dispatcher owns this conversation');
-    return;
+    if (current.dispatcherIdentity.isEqual(ctx.sender)) return;
+    const owner = ctx.db.roleGrant.identity.find(current.dispatcherIdentity);
+    if (owner?.role === roleOf(ctx)?.role) throw new SenderError('TAKEN_OVER: another operator owns this conversation');
+    ctx.db.conversationControl.incidentId.delete(incidentId);
   }
   ctx.db.conversationControl.insert({ incidentId, dispatcherIdentity: ctx.sender, updatedAt: ctx.timestamp });
-  logEvent(ctx, incidentId, 'DISPATCHER_TAKEOVER', {});
+  logEvent(ctx, incidentId, roleOf(ctx)?.role === 'RESPONDER' ? 'RESPONDER_TAKEOVER' : 'DISPATCHER_TAKEOVER', { unitId: roleOf(ctx)?.unitId });
 });
 
 export const releaseConversation = spacetimedb.reducer({ incidentId: t.u64() }, (ctx, { incidentId }) => {
-  const grant = requireRole(ctx, 'DISPATCHER');
-  requireOpenIncident(ctx, incidentId);
+  const grant = requireConversationOperator(ctx, incidentId);
   const current = ctx.db.conversationControl.incidentId.find(incidentId);
   if (!current) return;
   if (!current.dispatcherIdentity.isEqual(ctx.sender) && grant.role !== 'ADMIN') throw new SenderError('NOT_CONVERSATION_OWNER');
@@ -903,18 +955,19 @@ export const releaseConversation = spacetimedb.reducer({ incidentId: t.u64() }, 
 export const sendDispatcherMessage = spacetimedb.reducer(
   { incidentId: t.u64(), text: t.string(), clientMessageId: t.string() },
   (ctx, { incidentId, text, clientMessageId }) => {
-    requireRole(ctx, 'DISPATCHER');
+    const grant = requireConversationOperator(ctx, incidentId);
     const inc = requireOpenIncident(ctx, incidentId);
     const control = ctx.db.conversationControl.incidentId.find(incidentId);
     if (!control?.dispatcherIdentity.isEqual(ctx.sender)) throw new SenderError('NOT_CONVERSATION_OWNER');
     const body = text.trim();
     if (!body || body.length > 2000) throw new SenderError('INVALID_MESSAGE: enter 1–2000 characters');
     if (!clientMessageId.trim() || clientMessageId.length > 100) throw new SenderError('INVALID_MESSAGE_ID');
-    const kind = `DISPATCHER:${ctx.sender.toHexString()}:${clientMessageId}`;
+    const sender = grant.role === 'RESPONDER' ? 'RESPONDER' : 'DISPATCHER';
+    const kind = `${sender}:${ctx.sender.toHexString()}:${clientMessageId}`;
     if ([...ctx.db.outboundMessage.conversationId.filter(inc.conversationId)].some(row => row.kind === kind && row.caseEpoch === inc.caseEpoch)) return;
-    const labelled = body.startsWith('[SIMULATION]') ? body : `[SIMULATION] Dispatcher: ${body}`;
+    const labelled = body.startsWith('[SIMULATION]') ? body : `[SIMULATION] ${sender === "RESPONDER" ? grant.unitId : "Dispatcher"}: ${body}`;
     const job = ctx.db.notification.insert({ id: 0n, conversationId: inc.conversationId, incidentId, assignmentId: undefined,
-      kind: 'DISPATCHER_REPLY', text: labelled, eventAssignmentStatus: undefined, eventAt: ctx.timestamp,
+      kind: sender === 'RESPONDER' ? 'RESPONDER_REPLY' : 'DISPATCHER_REPLY', text: labelled, eventAssignmentStatus: undefined, eventAt: ctx.timestamp,
       status: 'PENDING', attempts: 0, lastError: undefined, sentAt: undefined });
     ctx.db.outboundMessage.insert({ id: 0n, conversationId: inc.conversationId, caseEpoch: inc.caseEpoch, incidentId,
       notificationId: job.id, kind, text: labelled, delivery: 'QUEUED', at: ctx.timestamp });
@@ -974,6 +1027,7 @@ export const confirmDispatchAndAssign = spacetimedb.reducer(
 
 /** Ends the conversation's association with a finished incident and starts a fresh intake case. */
 function endCase(ctx: Ctx, inc: { id: bigint; conversationId: bigint }) {
+  ctx.db.conversationControl.incidentId.delete(inc.id);
   const convo = ctx.db.conversation.id.find(inc.conversationId);
   if (!convo || convo.activeIncidentId !== inc.id) return undefined;
   // Later context reads exclude this case's messages and question.
@@ -1031,6 +1085,21 @@ export const closeIncident = spacetimedb.reducer(
   }
 );
 
+/** Repeat a local demonstration without deleting identities, IDs or provider dedupe history. */
+export const restartDemo = spacetimedb.reducer(ctx => {
+  requireRole(ctx, 'ADMIN');
+  for (const inc of ctx.db.incident.iter()) {
+    if (inc.status === 'CLOSED' || inc.status === 'RESOLVED') continue;
+    for (const a of ctx.db.assignment.incidentId.filter(inc.id)) ctx.db.assignment.id.update({ ...a, status: 'COMPLETED', updatedAt: ctx.timestamp });
+    ctx.db.incident.id.update({ ...inc, status: inc.status === 'DISPATCHED' ? 'RESOLVED' : 'CLOSED', closeReason: inc.status === 'DISPATCHED' ? inc.closeReason : 'Demo restarted', updatedAt: ctx.timestamp });
+    logEvent(ctx, inc.id, 'DEMO_RESTARTED');
+    endCase(ctx, inc);
+  }
+  for (const u of ctx.db.unit.iter()) ctx.db.unit.id.update({ ...u, status: 'AVAILABLE' });
+  for (const n of ctx.db.notification.iter()) if (n.status !== 'SENT') ctx.db.notification.id.update({ ...n, status: 'CANCELLED', lastError: 'Demo restarted' });
+  for (const o of ctx.db.outboundMessage.iter()) if (o.delivery === 'QUEUED') ctx.db.outboundMessage.id.update({ ...o, delivery: 'FAILED' });
+});
+
 // ---- Responder operations ----
 
 export const advanceAssignment = spacetimedb.reducer(
@@ -1048,6 +1117,11 @@ export const advanceAssignment = spacetimedb.reducer(
     logEvent(ctx, a.incidentId, `UNIT_${nextStatus}`, { unitId: a.unitId });
 
     if (nextStatus === 'COMPLETED') {
+      const control = ctx.db.conversationControl.incidentId.find(a.incidentId);
+      if (control && ctx.db.roleGrant.identity.find(control.dispatcherIdentity)?.unitId === a.unitId) {
+        ctx.db.conversationControl.incidentId.delete(a.incidentId);
+        logEvent(ctx, a.incidentId, 'AGENT_RESUMED');
+      }
       const u = ctx.db.unit.id.find(a.unitId);
       if (u) ctx.db.unit.id.update({ ...u, status: 'AVAILABLE' });
     }
@@ -1109,6 +1183,9 @@ const AgentNotification = t.row('PendingNotificationRow', {
   assignmentId: t.option(t.u64()),
   kind: t.string(),
   text: t.string(),
+  callerLanguage: t.string(),
+  translatedText: t.option(t.string()),
+  translationLanguage: t.option(t.string()),
   eventAssignmentStatus: t.option(t.string()),
   eventAt: t.timestamp(),
   status: t.string(),
@@ -1206,7 +1283,7 @@ export const agentNotification = spacetimedb.view(
     if (!hasRole(ctx, 'AGENT')) return [];
     const out = [];
     for (const n of ctx.db.notification.iter()) {
-      if (n.status === 'SENT') continue;
+      if (n.status !== 'PENDING' && n.status !== 'FAILED') continue;
       const convo = ctx.db.conversation.id.find(n.conversationId);
       if (!convo) continue;
       out.push({
@@ -1219,6 +1296,9 @@ export const agentNotification = spacetimedb.view(
         assignmentId: n.assignmentId,
         kind: n.kind,
         text: n.text,
+        callerLanguage: languageFor(ctx.db.messageTranslation.conversationId.filter(convo.id), n.incidentId === undefined ? convo.caseEpoch : ctx.db.incident.id.find(n.incidentId)?.caseEpoch ?? convo.caseEpoch),
+        translatedText: ctx.db.messageTranslation.key.find(`notification:${n.id}`)?.translatedText,
+        translationLanguage: ctx.db.messageTranslation.key.find(`notification:${n.id}`)?.language,
         eventAssignmentStatus: n.eventAssignmentStatus,
         eventAt: n.eventAt,
         status: n.status,
@@ -1238,6 +1318,8 @@ const ConversationMessageRow = t.row('ConversationMessageRow', {
   sender: t.string(), // CALLER | AGENT
   text: t.string(),
   at: t.timestamp(),
+  translatedText: t.option(t.string()),
+  language: t.option(t.string()),
   delivery: t.option(t.string()), // AGENT rows only: SENT | FAILED
 });
 
@@ -1250,17 +1332,18 @@ export const incidentConversationView = spacetimedb.view(
   t.array(ConversationMessageRow),
   ctx => {
     const grant = roleOf(ctx);
-    if (!grant || (grant.role !== 'DISPATCHER' && grant.role !== 'ADMIN')) return [];
+    if (!grant || !['DISPATCHER', 'ADMIN', 'RESPONDER'].includes(grant.role)) return [];
     const out = [];
     for (const inc of ctx.db.incident.iter()) {
+      if (grant.role === 'RESPONDER' && ![...ctx.db.assignment.incidentId.filter(inc.id)].some(a => a.unitId === grant.unitId)) continue;
       const rows = [];
       for (const m of ctx.db.inboundMessage.conversationId.filter(inc.conversationId)) {
         if (m.caseEpoch !== inc.caseEpoch) continue;
-        rows.push({ key: `in:${m.id}`, incidentId: inc.id, sender: 'CALLER', text: m.text, at: m.receivedAt, delivery: undefined });
+        rows.push({ key: `in:${m.id}`, incidentId: inc.id, sender: 'CALLER', text: m.text, at: m.receivedAt, delivery: undefined, translatedText: ctx.db.messageTranslation.key.find(`in:${m.id}`)?.translatedText, language: ctx.db.messageTranslation.key.find(`in:${m.id}`)?.language });
       }
       for (const o of ctx.db.outboundMessage.conversationId.filter(inc.conversationId)) {
         if (o.caseEpoch !== inc.caseEpoch) continue;
-        rows.push({ key: `out:${o.id}`, incidentId: inc.id, sender: o.kind.startsWith('DISPATCHER:') ? 'DISPATCHER' : 'AGENT', text: o.text, at: o.at, delivery: o.delivery });
+        rows.push({ key: `out:${o.id}`, incidentId: inc.id, sender: o.kind.startsWith('DISPATCHER:') ? 'DISPATCHER' : o.kind.startsWith('RESPONDER:') ? 'RESPONDER' : 'AGENT', text: o.text, at: o.at, delivery: o.delivery, translatedText: ctx.db.messageTranslation.key.find(o.notificationId === undefined ? `out:${o.id}` : `notification:${o.notificationId}`)?.translatedText, language: ctx.db.messageTranslation.key.find(o.notificationId === undefined ? `out:${o.id}` : `notification:${o.notificationId}`)?.language });
       }
       rows.sort((a, b) => {
         const d = a.at.microsSinceUnixEpoch - b.at.microsSinceUnixEpoch;
@@ -1278,12 +1361,32 @@ export const incidentEventView = spacetimedb.view(
   t.array(incidentEvent.rowType),
   ctx => {
     const grant = roleOf(ctx);
-    if (!grant || (grant.role !== 'DISPATCHER' && grant.role !== 'ADMIN')) return [];
-    return [...ctx.db.incidentEvent.iter()];
+    if (!grant || !['DISPATCHER', 'ADMIN', 'RESPONDER'].includes(grant.role)) return [];
+    return [...ctx.db.incidentEvent.iter()].filter(e => grant.role !== 'RESPONDER' || [...ctx.db.assignment.incidentId.filter(e.incidentId)].some(a => a.unitId === grant.unitId));
   }
 );
 
 export const conversationControlView = spacetimedb.view(
-  { name: 'conversation_control_view', public: true }, t.array(conversationControl.rowType),
-  ctx => hasRole(ctx, 'DISPATCHER', 'AGENT') ? [...ctx.db.conversationControl.iter()] : []
+  { name: 'conversation_control_view', public: true },
+  t.array(t.row('ConversationControlRow', { incidentId: t.u64().primaryKey(), dispatcherIdentity: t.identity(), updatedAt: t.timestamp(), role: t.string(), unitId: t.option(t.string()) })),
+  ctx => [...ctx.db.conversationControl.iter()].filter(c => hasRole(ctx, 'DISPATCHER', 'AGENT') || (roleOf(ctx)?.role === 'RESPONDER' && [...ctx.db.assignment.incidentId.filter(c.incidentId)].some(a => a.unitId === roleOf(ctx)?.unitId)))
+    .map(c => ({ ...c, role: ctx.db.roleGrant.identity.find(c.dispatcherIdentity)?.role ?? 'DISPATCHER', unitId: ctx.db.roleGrant.identity.find(c.dispatcherIdentity)?.unitId }))
+);
+
+function languageFor(rows: Iterable<{ key: string; language: string; caseEpoch: number }>, epoch: number): string {
+  const inbound = [...rows].filter(r => r.caseEpoch === epoch && r.key.startsWith('in:'));
+  inbound.sort((a, b) => BigInt(a.key.slice(3)) > BigInt(b.key.slice(3)) ? -1 : 1);
+  return inbound[0]?.language ?? 'en';
+}
+export const agentMessageTranslation = spacetimedb.view(
+  { name: 'agent_message_translation', public: true },
+  t.array(t.row('AgentMessageTranslationRow', { key: t.string().primaryKey(), conversationKey: t.string(), caseEpoch: t.u32(), messageId: t.string(), language: t.string(), translatedText: t.string() })),
+  ctx => {
+    if (!hasRole(ctx, 'AGENT')) return [];
+    return [...ctx.db.messageTranslation.iter()].filter(r => r.key.startsWith('in:')).flatMap(r => {
+      const convo = ctx.db.conversation.id.find(r.conversationId);
+      const message = ctx.db.inboundMessage.id.find(BigInt(r.key.slice(3)));
+      return convo && message ? [{ key: r.key, conversationKey: convo.conversationKey, caseEpoch: r.caseEpoch, messageId: message.messageId, language: r.language, translatedText: r.translatedText }] : [];
+    });
+  }
 );

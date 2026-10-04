@@ -41,13 +41,16 @@ import CloseIncidentReducer from "./close_incident_reducer";
 import CompleteInboundWithoutPatchReducer from "./complete_inbound_without_patch_reducer";
 import ConfirmDispatchAndAssignReducer from "./confirm_dispatch_and_assign_reducer";
 import GrantRoleReducer from "./grant_role_reducer";
+import PrepareNotificationTranslationReducer from "./prepare_notification_translation_reducer";
 import RecordExtractionFailureReducer from "./record_extraction_failure_reducer";
 import RecordInboundReducer from "./record_inbound_reducer";
+import RecordInboundTranslationReducer from "./record_inbound_translation_reducer";
 import RecordSentQuestionReducer from "./record_sent_question_reducer";
 import RecordSharedLocationReducer from "./record_shared_location_reducer";
 import ReleaseConversationReducer from "./release_conversation_reducer";
 import ResetDemoReducer from "./reset_demo_reducer";
 import ResolveIncidentReducer from "./resolve_incident_reducer";
+import RestartDemoReducer from "./restart_demo_reducer";
 import RevokeRoleReducer from "./revoke_role_reducer";
 import SendDispatcherMessageReducer from "./send_dispatcher_message_reducer";
 import TakeOverConversationReducer from "./take_over_conversation_reducer";
@@ -57,6 +60,7 @@ import TakeOverConversationReducer from "./take_over_conversation_reducer";
 // Import all table schema definitions
 import AgentConversationRow from "./agent_conversation_table";
 import AgentInboundRow from "./agent_inbound_table";
+import AgentMessageTranslationRow from "./agent_message_translation_table";
 import AgentNotificationRow from "./agent_notification_table";
 import AssignmentViewRow from "./assignment_view_table";
 import ConversationControlViewRow from "./conversation_control_view_table";
@@ -84,6 +88,13 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, AgentInboundRow),
+  agentMessageTranslation: __table({
+    name: 'agent_message_translation',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, AgentMessageTranslationRow),
   agentNotification: __table({
     name: 'agent_notification',
     indexes: [
@@ -151,13 +162,16 @@ const reducersSchema = __reducers(
   __reducerSchema("complete_inbound_without_patch", CompleteInboundWithoutPatchReducer),
   __reducerSchema("confirm_dispatch_and_assign", ConfirmDispatchAndAssignReducer),
   __reducerSchema("grant_role", GrantRoleReducer),
+  __reducerSchema("prepare_notification_translation", PrepareNotificationTranslationReducer),
   __reducerSchema("record_extraction_failure", RecordExtractionFailureReducer),
   __reducerSchema("record_inbound", RecordInboundReducer),
+  __reducerSchema("record_inbound_translation", RecordInboundTranslationReducer),
   __reducerSchema("record_sent_question", RecordSentQuestionReducer),
   __reducerSchema("record_shared_location", RecordSharedLocationReducer),
   __reducerSchema("release_conversation", ReleaseConversationReducer),
   __reducerSchema("reset_demo", ResetDemoReducer),
   __reducerSchema("resolve_incident", ResolveIncidentReducer),
+  __reducerSchema("restart_demo", RestartDemoReducer),
   __reducerSchema("revoke_role", RevokeRoleReducer),
   __reducerSchema("send_dispatcher_message", SendDispatcherMessageReducer),
   __reducerSchema("take_over_conversation", TakeOverConversationReducer),

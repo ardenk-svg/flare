@@ -1,3 +1,4 @@
+import { intakeCategory, missingIntakeFields } from "@flare/contracts";
 // Display-only helpers for the dispatcher console. Pure functions over IncidentView so backend data
 // (severity, readable reasons, real activity events) can replace each one later without touching components.
 import type { ActivityEvent, ActivityKind, Assignment, AssignmentStatus, IncidentView, Service, Unit } from "./types";
@@ -38,31 +39,12 @@ export const incidentTitle = (i: IncidentView) =>
 
 // ---- Category ----
 export type Category = "violent" | "fire" | "medical" | "traffic" | "other";
-const CATEGORY_WORDS: [Category, RegExp][] = [
-  ["traffic", /crash|collision|accident|vehicle|\bcars?\b|truck|traffic|hit and run|motorcycle/],
-  ["fire", /fire|smoke|burn|flame|explosion|gas leak/],
-  ["violent", /robb|assault|fight|weapon|gun|knife|stab|shoot|threat|attack|break.?in|burglar|theft|steal|mug/],
-  ["medical", /medical|collapse|unconscious|breath|seizure|heart|chest|overdose|bleed|injur|fell|fall|sick|allerg|faint/],
-];
 
 export function categoryOf(i: IncidentView): Category {
-  const type = i.facts.incidentType?.toLowerCase() ?? "";
-  for (const [c, re] of CATEGORY_WORDS) if (re.test(type)) return c;
-  const f = i.facts;
-  if (f.fireOrSmoke) return "fire";
-  if (f.violentThreat) return "violent";
-  if (f.callerReportedBreathing === false || f.callerReportedConscious === false || f.injuryReported) return "medical";
-  return "other";
+  return intakeCategory(i.facts);
 }
 
 // ---- Known / still needed ----
-const RELEVANT: Record<Category, string[]> = {
-  violent: ["weaponPresent", "suspectCount", "injuryReported", "callerStatus", "peopleInvolved"],
-  fire: ["trappedPerson", "fireOrSmoke", "injuryReported", "peopleInvolved"],
-  medical: ["callerReportedConscious", "callerReportedBreathing", "patientAge", "injuryReported"],
-  traffic: ["injuryReported", "vehicleCount", "trappedPerson", "fireOrSmoke", "roadBlocked"],
-  other: ["incidentType", "injuryReported", "violentThreat", "fireOrSmoke", "peopleInvolved"],
-};
 
 export interface FactRow { key: string; label: string }
 export interface KnownFact extends FactRow { value: string | number | boolean }
@@ -77,10 +59,7 @@ export function getKnownFacts(i: IncidentView): KnownFact[] {
 
 /** Unknown facts that matter for this kind of incident. Location is first when nothing places the caller. */
 export function getRelevantMissingFacts(i: IncidentView): FactRow[] {
-  const f = factsOf(i);
-  const keys = RELEVANT[categoryOf(i)].filter((k) => !known(f[k]));
-  if (!known(f.locationText) && !i.sharedLocation) keys.unshift("locationText");
-  return keys.map((k) => ({ key: k, label: FACT_LABELS[k] ?? k }));
+  return missingIntakeFields(i.facts, !!i.sharedLocation, i.unresolvedFields ?? []).map(key => ({ key, label: FACT_LABELS[key] ?? key }));
 }
 
 // ---- Severity (display only; replace with a backend value when one exists) ----
@@ -182,6 +161,7 @@ const NOTIFIED: Record<string, string> = {
   DISPATCH_CONFIRMED: "Caller told help is being sent",
   ASSIGNMENT_EN_ROUTE: "Caller told a unit is en route",
   INFO_REPLY: "Status reply sent to caller",
+  RESPONDER_REPLY: "Responder message delivered to caller",
   DISPATCHER_REPLY: "Dispatcher message delivered to caller",
 };
 
@@ -189,6 +169,8 @@ const NOTIFIED: Record<string, string> = {
 export function activityLabel(e: ActivityEvent): string {
   const unit = e.unitId ?? "Unit";
   switch (e.kind) {
+    case "RESPONDER_TAKEOVER": return `${e.unitId ?? "Responder"} took over the caller conversation`;
+    case "DEMO_RESTARTED": return "Demo restarted";
     case "DISPATCHER_TAKEOVER": return "Dispatcher took over the caller conversation";
     case "AGENT_RESUMED": return "Automated caller questions resumed";
     case "INCIDENT_CREATED": return "Incident created";

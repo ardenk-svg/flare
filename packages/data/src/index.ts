@@ -54,6 +54,7 @@ export const ALL_VIEWS = [
   tables.incidentConversationView,
   tables.incidentEventView,
   tables.conversationControlView,
+  tables.agentMessageTranslation,
 ];
 
 // ---- Errors ----
@@ -155,6 +156,7 @@ export function toPendingNotification(row: NotificationRow): PendingNotification
     assignmentId: row.assignmentId === undefined ? null : toId(row.assignmentId),
     kind: row.kind as NotificationKind,
     text: row.text,
+    callerLanguage: row.callerLanguage, translatedText: row.translatedText, translationLanguage: row.translationLanguage,
     eventAssignmentStatus: nul(row.eventAssignmentStatus) as AssignmentStatus | null,
     eventAt: toIso(row.eventAt),
     attempts: row.attempts,
@@ -230,9 +232,25 @@ export function listConversation(conn: DbConnection, incidentId: string): Conver
       incidentId,
       sender: r.sender as ConversationMessage['sender'],
       text: r.text,
+      translatedText: nul(r.translatedText), language: nul(r.language),
       at: toIso(r.at),
       delivery: nul(r.delivery) as ConversationMessage['delivery'],
     }));
+}
+
+export function getConversationControl(conn: DbConnection, incidentId: string) {
+  const row = [...conn.db.conversationControlView.iter()].find(row => row.incidentId === fromId(incidentId));
+  return row ? { identity: row.dispatcherIdentity.toHexString(), role: row.role, unitId: row.unitId ?? null } : null;
+}
+
+export function getInboundTranslation(conn: DbConnection, conversationKey: string, messageId: string) {
+  return [...conn.db.agentMessageTranslation.iter()].find(r => r.conversationKey === conversationKey && r.messageId === messageId) ?? null;
+}
+export function recordInboundTranslation(conn: DbConnection, input: { conversationKey: string; messageId: string; language: string; translatedText: string }) {
+  return call(conn.reducers.recordInboundTranslation(input));
+}
+export function prepareNotificationTranslation(conn: DbConnection, input: { notificationId: string; language: string; translatedText: string }) {
+  return call(conn.reducers.prepareNotificationTranslation({ ...input, notificationId: fromId(input.notificationId) }));
 }
 
 export function getConversationController(conn: DbConnection, incidentId: string): string | null {
@@ -305,6 +323,8 @@ function contextFor(conn: DbConnection, convo: ConversationRow): ConversationCon
     caseEpoch: convo.caseEpoch,
     activeIncident,
     dispatcherIdentity: activeIncident ? getConversationController(conn, activeIncident.id) : null,
+    callerLanguage: [...conn.db.agentMessageTranslation.iter()].filter(r => r.conversationKey === convo.conversationKey && r.caseEpoch === convo.caseEpoch)
+      .sort((a, b) => BigInt(a.key.slice(3)) > BigInt(b.key.slice(3)) ? -1 : 1)[0]?.language ?? 'en',
     intakeRevision: activeIncident?.intakeRevision ?? 0,
     currentFacts: activeIncident?.facts ?? emptyFacts(),
     currentSummary: activeIncident?.summary ?? '',
@@ -471,7 +491,7 @@ export function completeInboundWithoutPatch(
 
 export function recordSentQuestion(
   conn: DbConnection,
-  input: { conversationKey: string; question: string; delivered: boolean; error?: string }
+  input: { conversationKey: string; question: string; delivered: boolean; error?: string; translatedText?: string; language?: string }
 ): Promise<void> {
   return call(conn.reducers.recordSentQuestion(input));
 }

@@ -379,3 +379,7 @@ button { font: inherit; }
 .dispatcher-compose { display: grid; gap: 10px; margin-top: 16px; }
 .dispatcher-compose textarea { width: 100%; resize: vertical; font: inherit; padding: 10px; border: 1px solid var(--line, #d0d5dd); border-radius: 8px; background: inherit; color: inherit; }
 .dispatcher-compose .btn { justify-self: start; }
+
+.msg-translation { margin-top: .65rem; padding-top: .6rem; border-top: 1px solid var(--border); }
+.msg-translation .sublabel { display: block; margin-bottom: .3rem; }
+.demo-restart { display: grid; gap: .25rem; max-width: 260px; }

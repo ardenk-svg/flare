@@ -1,3 +1,4 @@
+import type { TranslateText } from "@flare/intake";
 import type { PendingNotification } from "@flare/contracts";
 
 import { toProviderRoute, type AgentDataPort } from "./data-port.js";
@@ -12,9 +13,11 @@ export interface NotificationWorkerOptions {
   pollMs: number;
   maxAttempts: number;
   logger?: OrchestratorLogger;
+  translateText?: TranslateText;
 }
 
 export class NotificationWorker {
+  readonly #translateText: TranslateText | undefined;
   readonly #data: AgentDataPort;
   readonly #state: AgentStateStore;
   readonly #sendRoute: RouteSender;
@@ -29,6 +32,7 @@ export class NotificationWorker {
   #stopped = true;
 
   constructor(options: NotificationWorkerOptions) {
+    this.#translateText = options.translateText;
     this.#data = options.data;
     this.#state = options.state;
     this.#sendRoute = options.sendRoute;
@@ -87,7 +91,16 @@ export class NotificationWorker {
 
     this.#inFlight.add(job.id);
     try {
-      await this.#sendRoute(route, job.text);
+      let text = job.translatedText ?? job.text;
+      const language = job.callerLanguage ?? 'en';
+      if (!job.translatedText && this.#translateText && !language.startsWith('en')) {
+        const translated = await this.#translateText({ text: job.text, sourceLanguage: 'en', targetLanguage: language });
+        await this.#data.prepareNotificationTranslation({ notificationId: job.id, language, translatedText: translated.text });
+        text = this.#data.listPendingNotifications().find(n => n.id === job.id)?.translatedText ?? translated.text;
+      }
+      // A local demo restart cancels old jobs without restarting this worker.
+      if (!this.#data.listPendingNotifications().some(n => n.id === job.id)) return;
+      await this.#sendRoute(route, text);
       await this.#data.ackNotification({ notificationId: job.id, delivered: true });
       this.#completed.add(job.id);
       this.#retryAfter.delete(job.id);

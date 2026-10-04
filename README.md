@@ -132,6 +132,14 @@ The dispatcher can **Take over** an active conversation, send labelled messages,
 
 The agent checks an already-shared Find My snapshot before asking a report's location question. Existing pins also set a boolean in model context; coordinates and attachments stay outside Gemini. A final delivery guard suppresses address/location questions when the case already has a pin or typed location. Automatic lookup cannot reuse a previous case's sharing binding.
 
+For intake, the agent continues asking one question at a time until the relevant **Still needed** fields are answered, explicitly unknown, or a dispatcher/responder takes over. Shared pins, false answers and zero counts count correctly. Unknown answers remain visible without repeated questions; unrelated fields are not required.
+
+Assigned responders can read the complete original/translated conversation and activity, review all reported facts, **Take over** the chat, message the caller, **Return to agent**, and advance their own assignment. Responders cannot access other units' cases or perform dispatcher assignment/resolve actions. Dispatchers can regain control of an assigned responder's chat.
+
+Gemini detects the caller's language and generates an English translation for both operator views. Replies (including human messages and status notifications) use that caller language. Original caller evidence stays verbatim, translations are stored separately, and known non-English delivery waits for translation rather than sending an English fallback. Translation uses the existing Gemini settings, requires no additional key, and adds a model call for each new caller message/non-English outgoing message.
+
+To rehearse repeatedly, start `npm run e2e -- --keep` once, then use **Restart demo** in the dispatcher. It ends current mock cases, frees units and cancels unsent work while preserving the services, both tabs, identities and phone thread. Send a new report from the same phone for the next run. Prior cases remain in Resolved and closed. Request sharing again if using Find My in a new case. This control is available only with the local demo runner.
+
 For payload diagnostics, stop the designated phone worker before running `npm run agent:probe:locations -- --seconds=60`, then restart the worker. The probe records incoming shapes and caller-specific API availability without logging handles or coordinates. Keep exactly one inbox consumer running.
 
 ## Testing
