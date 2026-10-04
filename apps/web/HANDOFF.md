@@ -30,6 +30,17 @@ Coverage, in order:
 
 Cross-client checks pass only when an update arrives by subscription, since the observing client never re-reads on its own.
 
+## Demo data: `npm run seed:demo -w @flare/web -- [--dispatcher <hex>] [--responder <hex>]`
+**Resets the local database** (refuses a non-local `SPACETIMEDB_URI`) and seeds four simulated incidents: one resolved, one dispatched with FIRE-01 en route, one ready for review (FIRE + EMS recommended), and one collecting with no location and a message still pending. Pass your browser identity hexes to grant DISPATCHER and RESPONDER `FIRE-01` in the same step. Use it for UI review and rehearsals, never on the shared database.
+
+## UI (issue #17)
+- Plain CSS tokens on `:root` in `src/styles.css`, no new dependency. `App.tsx` owns the SIMULATION strip and top bar, so every screen (including the access gate) shows the label.
+- Dispatcher: active queue newest first, with resolved incidents collapsed. Each row has a status chip, relative time, location or "Location missing", and review/extraction flags. The detail splits into two columns when the detail pane is at least 760px wide (container query), so it also works at half of a 1440px projector.
+- Facts show known values with the caller's quoted words. Unknown fields sit behind "Show unknown fields", and message IDs are never rendered.
+- Dispatch panel: service toggles default to the recommendation. Unchecking a service drops its units. Units are grouped by service, and blockers are written in plain language.
+- Responder: the next action is one large button, followed by a stepper, the location, and safety chips (unknowns hidden).
+- Unchanged: `src/data/*`, `FlareClient`, contract types, AccessGate gating logic, and no optimistic success.
+
 ## Live mode in the browser
 1. Setup above, then `cd apps/web && cp .env.example .env.local && npm run dev`.
 2. Open `/dispatcher` and `/responder` side by side in one browser profile. Each route keeps its own identity token in `localStorage`: `flare-live-token:dispatcher`, `flare-live-token:responder`, or `flare-live-token:responder:<UNIT>` when the URL has `?unit=<UNIT>` (use it to run a second responder tab). The dispatcher falls back once to the old single key `flare-live-token`, so an identity granted before this change keeps its role. A new identity shows "no role yet" with its hex. Grant it: `spacetime call --server local flare-dev grant_role <hex> DISPATCHER '{"none":[]}'` or `... RESPONDER '{"some":"FIRE-01"}'`. The page updates without reload. The fixture-only "Responder (EMS-01)" nav link is hidden in live mode.
@@ -49,6 +60,11 @@ Cross-client checks pass only when an update arrives by subscription, since the 
   - Dispatcher goes from no-role to granted without a reload, and the incident appears live.
   - Banner reads "Extraction pending" (blue), then "Extraction failed: TIMEOUT…" (red), and the banner disappears on success. Facts and evidence stayed visible the whole time.
   - Confirming FIRE-01 from the UI moves the incident to DISPATCHED. Responder Accept and En Route clicks move the assignment to EN_ROUTE, and the dispatcher shows EN_ROUTE.
+
+## Checks run for the UI overhaul (local SpacetimeDB 2.10.2)
+- `npm run typecheck -w @flare/web`, `npm run build -w @flare/web`: pass. `npm run smoke:live -w @flare/web`: passed.
+- `seed:demo` against local, then a throwaway server render of both routes (dispatcher, responder FIRE-01, and responder EMS-01 with no assignment) against the live snapshot. All three rendered with no errors, and no message IDs appeared in the text.
+- **Not yet done:** eyeballing the pages in a real browser, and before/after screenshots for the #17 PR. Check focus rings, the 1440x900 side-by-side layout, and phone width by eye.
 
 ## Unresolved / needs others
 - **Root `npm run check` fails on main in `apps/agent`, not the web app.** Person 1's merged orchestrator predates Person 3's contract change: `data-port.ts` omits `route` in `recordInbound`, and the agent test fixtures lack `route`, `extractionState`, and `caseEpoch`. Person 1 needs to rebase.
