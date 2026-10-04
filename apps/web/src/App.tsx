@@ -1,18 +1,35 @@
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import Dispatcher from "./routes/Dispatcher";
 import Responder from "./routes/Responder";
-import { AccessGate, ConnectionStatus, IdentityBadge, SimBanner } from "./components";
+import { AccessGate, ConnectionStatus, Icon, IdentityBadge, SimBanner } from "./components";
+import { useSnapshot } from "./data";
 
-const LIVE = import.meta.env.VITE_DATA_MODE === "live";
+// Seeded by the SpacetimeDB module's init; used until the backend's unit list arrives (or if this identity can't read it).
+const SEEDED_UNITS = ["FIRE-01", "EMS-01", "POLICE-01"];
+
+// Picks which responder unit to view. Navigates with a full reload because the identity is chosen per page load;
+// in live mode each unit gets its own browser identity, which the operator grants once.
+function UnitPicker() {
+  const { units, identity } = useSnapshot();
+  const ids = units.length ? units.map((u) => u.id) : SEEDED_UNITS;
+  const current = new URLSearchParams(location.search).get("unit") ?? identity.unitId ?? "";
+  return (
+    <label className="unit-picker">
+      <span className="unit-picker-label">Unit</span>
+      <select value={current} onChange={(e) => { location.href = `/responder?unit=${encodeURIComponent(e.target.value)}`; }}>
+        {ids.map((id) => <option key={id} value={id}>{id}</option>)}
+      </select>
+      <Icon name="chevron" />
+    </label>
+  );
+}
 
 // Plain <a> links (full reload): the identity is picked per page load, in fixture and live mode alike.
 function TopBar() {
-  const { pathname, search } = useLocation();
-  const here = pathname + search;
+  const { pathname } = useLocation();
   const links = [
     { href: "/dispatcher", label: "Dispatcher" },
     { href: "/responder", label: "Responder" },
-    ...(LIVE ? [] : [{ href: "/responder?unit=EMS-01", label: "Responder (EMS-01)" }]),
   ];
   return (
     <header>
@@ -20,7 +37,8 @@ function TopBar() {
       <div className="topbar">
         <a className="brand" href="/dispatcher"><img src="/flare-mark.svg" alt="" />Flare</a>
         <nav className="nav" aria-label="Views">
-          {links.map((l) => <a key={l.href} href={l.href} aria-current={here === l.href ? "page" : undefined}>{l.label}</a>)}
+          {links.map((l) => <a key={l.href} href={l.href} aria-current={pathname === l.href ? "page" : undefined}>{l.label}</a>)}
+          {pathname.startsWith("/responder") && <UnitPicker />}
         </nav>
         <div className="topbar-right">
           <IdentityBadge />

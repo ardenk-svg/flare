@@ -17,6 +17,18 @@ export interface CallerFacts {
   trappedPerson: boolean | null;
   violentThreat: boolean | null;
   injuryReported: boolean | null;
+  /** Robbery/assault: caller reports a weapon. */
+  weaponPresent: boolean | null;
+  /** Robbery/assault: number of suspects the caller reports. */
+  suspectCount: number | null;
+  /** Short caller-supplied phrase about themselves, e.g. "hiding", "safe", "injured". */
+  callerStatus: string | null;
+  /** Traffic collision: vehicles involved. */
+  vehicleCount: number | null;
+  /** Medical: patient age in years as reported. */
+  patientAge: number | null;
+  /** Traffic: caller reports the road is blocked. */
+  roadBlocked: boolean | null;
 }
 
 export type CallerFactField = keyof CallerFacts;
@@ -32,6 +44,12 @@ export const CALLER_FACT_KINDS = {
   trappedPerson: "bool",
   violentThreat: "bool",
   injuryReported: "bool",
+  weaponPresent: "bool",
+  suspectCount: "count",
+  callerStatus: "text",
+  vehicleCount: "count",
+  patientAge: "count",
+  roadBlocked: "bool",
 } as const satisfies Record<CallerFactField, "text" | "count" | "bool">;
 
 export const CALLER_FACT_FIELDS = Object.keys(CALLER_FACT_KINDS) as CallerFactField[];
@@ -47,6 +65,12 @@ export function emptyFacts(): CallerFacts {
     trappedPerson: null,
     violentThreat: null,
     injuryReported: null,
+    weaponPresent: null,
+    suspectCount: null,
+    callerStatus: null,
+    vehicleCount: null,
+    patientAge: null,
+    roadBlocked: null,
   };
 }
 
@@ -182,8 +206,61 @@ export interface Incident {
   caseEpoch: number;
   /** Dispatcher's reason when status is CLOSED. */
   closeReason: string | null;
+  /** Provider-shared location (pin/Find My). Counts as a known location for readiness. */
+  sharedLocation: SharedLocation | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export type LocationSource = "IMESSAGE_PIN" | "FIND_MY";
+
+export interface SharedLocation {
+  latitude: number;
+  longitude: number;
+  accuracyMeters: number | null;
+  label: string | null;
+  source: LocationSource;
+  sharedAt: string;
+}
+
+/** One line of the dispatcher's caller transcript for an incident's case. */
+export interface ConversationMessage {
+  key: string;
+  incidentId: string;
+  sender: "CALLER" | "AGENT";
+  text: string;
+  at: string;
+  /** AGENT rows only. */
+  delivery: "SENT" | "FAILED" | null;
+}
+
+export type IncidentEventKind =
+  | "INCIDENT_CREATED"
+  | "CALLER_MESSAGE"
+  | "FACTS_UPDATED"
+  | "LOCATION_RECEIVED"
+  | "SERVICES_RECOMMENDED"
+  | "EXTRACTION_FAILED"
+  | "DISPATCH_CONFIRMED"
+  | "UNIT_ASSIGNED"
+  | "UNIT_ACCEPTED"
+  | "UNIT_EN_ROUTE"
+  | "UNIT_ON_SCENE"
+  | "UNIT_COMPLETED"
+  | "CALLER_NOTIFIED"
+  | "INCIDENT_RESOLVED"
+  | "INCIDENT_CLOSED";
+
+/** Activity-log entry, timestamped when the change committed. Carries no message text. */
+export interface IncidentEvent {
+  id: string;
+  incidentId: string;
+  kind: IncidentEventKind;
+  at: string;
+  unitId: string | null;
+  fields: CallerFactField[];
+  services: Service[];
+  detail: string | null;
 }
 
 export interface Unit {
