@@ -172,10 +172,14 @@ button { font: inherit; }
 .qcard-flags .chip { font-size: 12px; padding: 3px 7px; }
 .time { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text-3); white-space: nowrap; }
 .resolved-group { margin-top: 16px; }
-.resolved-group > summary {
-  cursor: pointer; min-height: 44px; display: flex; align-items: center; gap: 6px;
+.resolved-toggle {
+  cursor: pointer; min-height: 44px; width: 100%; display: flex; align-items: center; gap: 6px; padding: 0 4px;
+  background: none; border: 0; border-top: 1px solid var(--border); border-radius: 0; text-align: left;
   font-size: 13px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--text-2);
 }
+.resolved-toggle:hover { color: var(--text); }
+.resolved-toggle .icon { transition: transform .15s; }
+.resolved-toggle[aria-expanded="true"] .icon { transform: rotate(90deg); }
 .resolved-group .qcard { box-shadow: none; background: var(--surface-2); border-left-color: var(--border-strong); }
 .empty { padding: 24px 16px; text-align: center; color: var(--text-2); border: 1px dashed var(--border-strong); border-radius: var(--radius); background: var(--surface); }
 
@@ -339,11 +343,31 @@ button { font: inherit; }
 .resolve-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 14px; }
 
 /* ---- Responder ---- */
-.mission { border-top: 4px solid var(--primary); }
+/* Mission bar: status on the left, the one next action on the right; stacks on narrow screens. */
+.mission { border-top: 4px solid var(--primary); display: grid; gap: 16px 24px; grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); align-items: center; }
 .mission.done { border-top-color: #22c55e; }
-.mission-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
-.mission-head .mono { font-size: 15px; font-weight: 700; }
-.mission .stepper { margin: 16px 0 4px; }
+.mission-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 14px; }
+.mission-head > .mono { font-size: 18px; font-weight: 700; }
+.mission-meta { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-3); }
+.mission-action { display: grid; gap: 8px; }
+.mission-action .btn.big { min-height: 64px; font-size: 20px; }
+@media (max-width: 760px) { .mission { grid-template-columns: 1fr; } }
+/* Large progress bar for the responder: thicker track, bigger labels, current step called out. */
+.stepper.large { gap: 6px; }
+.stepper.large li { font-size: 15px; gap: 8px; font-weight: 600; }
+.stepper.large li::before { height: 12px; border-radius: 6px; }
+.stepper.large li.current { color: var(--primary); font-weight: 750; }
+.stepper.large li.current::before { box-shadow: 0 0 0 3px var(--info-bd); }
+.responder-grid { display: grid; gap: 12px; grid-template-columns: 1fr; align-items: start; }
+@media (min-width: 960px) { .responder-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+.essentials { border-left: 4px solid var(--crit); }
+.essentials-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 10px; }
+.essentials-type { font-size: 26px; font-weight: 750; line-height: 1.2; text-transform: uppercase; letter-spacing: .02em; }
+.essentials-summary { margin-top: 12px; font-size: 16px; }
+.details-card > summary { cursor: pointer; min-height: 32px; display: flex; align-items: center; gap: 8px; font-weight: 650; }
+.details-card[open] > summary { margin-bottom: 10px; }
+.details-card .kv { margin-bottom: 8px; }
+.kv-row { display: contents; }
 .pending-line { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 14px; color: var(--text-2); }
 .location { display: flex; gap: 10px; align-items: flex-start; font-size: 18px; font-weight: 600; }
 .location .icon { width: 20px; height: 20px; margin-top: 4px; color: var(--brand); }

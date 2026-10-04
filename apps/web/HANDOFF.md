@@ -128,6 +128,14 @@ The local dispatcher Restart demo button calls the temporary loopback bridge, wh
 
 Verification: root check passed 99 tests plus typechecks/build; 143 live adapter checks passed on an isolated local database; e2e:auto passed assigned-responder authorization, delivery, all service lifecycles and two restarts without restarting the worker or clients. Real Gemini passed synthetic Spanish detection/English translation, Spanish replies with the simulation label, and original-language fact evidence. Browser verification showed both text versions, responder takeover/composer/queued attribution, and the local restart success message. No real iMessage was sent by these tests.
 
+## Responder essentials and resolved toggle (2026-10-04)
+
+- Dispatcher queue: resolved/closed incidents are hidden behind a "Show/Hide resolved and closed (N)" toggle, off by default and remembered per browser (`localStorage` key `flare-dispatcher-show-done`, wrapped in try/catch). A hidden incident can't stay selected; the detail falls back to the top active one.
+- Responder: full-width two-column layout (single column under 960px). The mission bar puts unit/service/status and a large progress bar beside one primary action: Accept assignment → Mark en route → Mark on scene → Complete response.
+- Essentials card: incident type, priority, and chips only for reported alarming facts (violent threat, weapon, suspect count, fire, trapped, not breathing/conscious, injury, caller status), plus the summary. Other known facts and the unknown list sit in a collapsed "Additional incident details".
+- Location card (shared by both views): map when the caller shared coordinates, labelled with its source and "unverified"; typed text otherwise, labelled "Caller typed location · unverified" with no map. Coordinates are never invented.
+- Checks: `npm run typecheck -w @flare/web`, `npm test -w @flare/web` (9/9), `npm run build -w @flare/web` pass. **Not done:** visual browser pass (extension unavailable); check 1440px and phone width by eye.
+
 ## Intake priority correction (2026-10-04)
 
 Unclassified reports and pending/failed extraction now show **Needs assessment** instead of falling back to Low. Existing explicit High/Critical facts retain their priority during extraction. Queue order is Critical, High, Needs assessment, Medium, then oldest first within each group.

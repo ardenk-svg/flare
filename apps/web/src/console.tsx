@@ -180,7 +180,7 @@ export function IncidentLocation({ incident }: { incident: IncidentView }) {
   const corrected = incident.corrections.includes("locationText");
   if (shared)
     return (
-      <Section title="Location" icon="pin" hint={shared.source === "FIND_MY" ? "Shared via Find My" : "Shared via iMessage"}>
+      <Section title="Location" icon="pin" hint={`${shared.source === "FIND_MY" ? "Caller shared via Find My" : "Caller shared iMessage pin"} · unverified`}>
         <MapPreview loc={shared} />
         <p className="loc-main">{shared.label ?? typed ?? "Shared location"}</p>
         <p className="loc-sub">
@@ -195,11 +195,12 @@ export function IncidentLocation({ incident }: { incident: IncidentView }) {
       </Section>
     );
   return (
-    <Section title="Location" icon="pin" hint={typed ? "Typed by caller · no map pin" : undefined}>
+    <Section title="Location" icon="pin" hint={typed ? "Caller typed location · unverified" : undefined}>
       {typed ? (
         <>
           <p className="loc-main">{typed}{corrected && <span className="chip warn">Corrected</span>}</p>
           {quote && <blockquote className="quote">“{quote}”</blockquote>}
+          <p className="provenance">No map: the caller hasn't shared coordinates.</p>
         </>
       ) : (
         <p className="loc-missing"><Icon name="alert" />Location not yet provided</p>
