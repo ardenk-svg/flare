@@ -121,6 +121,7 @@ const incident = table(
     caseEpoch: t.u32(),
     createdAt: t.timestamp(),
     updatedAt: t.timestamp(),
+    closeReason: t.option(t.string()).default(undefined),
   }
 );
 
@@ -546,6 +547,7 @@ export const applyIntakePatch = spacetimedb.reducer(
         caseEpoch: convo.caseEpoch,
         createdAt: ctx.timestamp,
         updatedAt: ctx.timestamp,
+        closeReason: undefined,
       });
       ctx.db.conversation.id.update({ ...convo, activeIncidentId: inc.id, updatedAt: ctx.timestamp });
     }
@@ -655,6 +657,7 @@ export const confirmDispatchAndAssign = spacetimedb.reducer(
     const inc = ctx.db.incident.id.find(incidentId);
     if (!inc) throw new SenderError('NOT_FOUND: incident');
     if (inc.status === 'DISPATCHED' || inc.status === 'RESOLVED') throw new SenderError('ALREADY_DISPATCHED');
+    if (inc.status === 'CLOSED') throw new SenderError('INCIDENT_CLOSED');
     if (inc.status !== 'READY_FOR_REVIEW') throw new SenderError('NOT_READY');
     if (confirmedServices.length === 0) throw new SenderError('NO_CONFIRMED_SERVICES');
     if (unitIds.length === 0) throw new SenderError('NO_UNITS_SELECTED');
@@ -696,6 +699,24 @@ export const confirmDispatchAndAssign = spacetimedb.reducer(
   }
 );
 
+/** Ends the conversation's association with a finished incident and starts a fresh intake case. */
+function endCase(ctx: Ctx, inc: { id: bigint; conversationId: bigint }) {
+  const convo = ctx.db.conversation.id.find(inc.conversationId);
+  if (!convo || convo.activeIncidentId !== inc.id) return undefined;
+  // Later context reads exclude this case's messages and question.
+  ctx.db.conversation.id.update({
+    ...convo,
+    activeIncidentId: undefined,
+    caseEpoch: convo.caseEpoch + 1,
+    lastQuestion: undefined,
+    lastQuestionDelivery: undefined,
+    lastQuestionError: undefined,
+    lastQuestionAt: undefined,
+    updatedAt: ctx.timestamp,
+  });
+  return convo;
+}
+
 export const resolveIncident = spacetimedb.reducer({ incidentId: t.u64() }, (ctx, { incidentId }) => {
   requireRole(ctx, 'DISPATCHER');
   const inc = ctx.db.incident.id.find(incidentId);
@@ -706,21 +727,34 @@ export const resolveIncident = spacetimedb.reducer({ incidentId: t.u64() }, (ctx
     throw new SenderError('ASSIGNMENTS_NOT_COMPLETED');
   }
   ctx.db.incident.id.update({ ...inc, status: 'RESOLVED', updatedAt: ctx.timestamp });
-  const convo = ctx.db.conversation.id.find(inc.conversationId);
-  if (convo && convo.activeIncidentId === incidentId) {
-    // Start a new intake case: later context reads exclude this case's messages and question.
-    ctx.db.conversation.id.update({
-      ...convo,
-      activeIncidentId: undefined,
-      caseEpoch: convo.caseEpoch + 1,
-      lastQuestion: undefined,
-      lastQuestionDelivery: undefined,
-      lastQuestionError: undefined,
-      lastQuestionAt: undefined,
-      updatedAt: ctx.timestamp,
-    });
-  }
+  endCase(ctx, inc);
 });
+
+/** Closes a never-dispatched incident (test text, duplicate, no unit needed) so the caller can start a new case. */
+export const closeIncident = spacetimedb.reducer(
+  { incidentId: t.u64(), reason: t.string() },
+  (ctx, { incidentId, reason }) => {
+    requireRole(ctx, 'DISPATCHER');
+    const inc = ctx.db.incident.id.find(incidentId);
+    if (!inc) throw new SenderError('NOT_FOUND: incident');
+    if (inc.status !== 'COLLECTING' && inc.status !== 'READY_FOR_REVIEW') {
+      throw new SenderError(`NOT_CLOSABLE: ${inc.status}`);
+    }
+    if (!ctx.db.assignment.incidentId.filter(incidentId).next().done) throw new SenderError('HAS_ASSIGNMENTS');
+    if (reason.trim() === '') throw new SenderError('REASON_REQUIRED');
+    ctx.db.incident.id.update({ ...inc, status: 'CLOSED', closeReason: clip(reason.trim(), 200), updatedAt: ctx.timestamp });
+    if (endCase(ctx, inc)) {
+      enqueue(ctx, {
+        conversationId: inc.conversationId,
+        incidentId,
+        kind: 'INFO_REPLY',
+        text:
+          '[SIMULATION] A dispatcher closed your mock report without dispatching a unit. ' +
+          'No real emergency services were contacted. Text again to start a new report.',
+      });
+    }
+  }
+);
 
 // ---- Responder operations ----
 

@@ -41,7 +41,10 @@ function incident(overrides: Partial<Incident> = {}): Incident {
     confirmedServices: [],
     status: "READY_FOR_REVIEW",
     needsReview: false,
+    extractionState: "OK",
     extractionError: null,
+    caseEpoch: 1,
+    closeReason: null,
     createdAt: "2026-10-03T12:00:00.000Z",
     updatedAt: "2026-10-03T12:00:00.000Z",
     ...overrides,
@@ -51,6 +54,8 @@ function incident(overrides: Partial<Incident> = {}): Incident {
 function context(overrides: Partial<ConversationContext> = {}): ConversationContext {
   return {
     conversationKey: "imessage:chat-1",
+    route: { platform: "imessage", spaceId: "chat-1", line: null },
+    caseEpoch: 1,
     activeIncident: null,
     intakeRevision: 0,
     currentFacts: emptyFacts(),

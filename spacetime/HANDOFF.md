@@ -69,7 +69,18 @@ Env names (proposed, values local only): `SPACETIMEDB_URI` (e.g. `ws://127.0.0.1
 
 ## Checks run (local, in-memory server)
 
-`npm run check` in `packages/data`: 64/64 passed on 6 consecutive runs (integration-state branch). New checks:
+`FLARE_DB=flare-check npm run check:data:live`: 76/76 passed on 6 consecutive runs (close-and-docs branch). Close-without-dispatch checks:
+- only a dispatcher can close
+- a reason is required
+- dispatched incidents can't be closed
+- CLOSED stores the reason, starts a new case, clears the question, and queues one simulated reply
+- a closed incident can't be dispatched or closed again
+- the next message creates a clean incident
+- READY_FOR_REVIEW can also be closed
+
+Root `npm run check` passes, and `FLARE_DB=flare-check npm run smoke:live -w @flare/web` passes.
+
+Integration-state checks (64):
 - `PENDING → OK`, `PENDING → FAILED` (facts and revision kept), and a successful retry back to `OK`
 - case A resolved → case B in the same conversation: empty facts, summary and question, only its own messages, a separate incident; case A history kept
 - `STALE_CASE` and old-case evidence rejected
@@ -80,9 +91,10 @@ Earlier checks cover duplicate inbound, extraction failure retry, evidence valid
 
 ## Not done / open
 
-- Not yet published to Maincloud. Run `spacetime login`, then `npm run publish:shared` after this PR merges. Then collect identity hexes from Persons 1 and 4 and grant roles.
+- `flare-yyehc` on Maincloud is live with the integration-state schema (published, seeded, and the ADMIN grant verified on 2026-10-03). The `closeIncident` update only adds a column, so republishing it needs no `--delete-data`, and none is planned.
+- Role grants are pending: `AGENT` needs Person 1's hex, which `npm run agent:imessage` prints on first connect. `DISPATCHER` and `RESPONDER FIRE-01` need Person 4's browser hexes.
 - The route field mapping (`space.id`, `space.phone`) comes from the `@spectrum-ts/imessage` 12.10.1 type definitions. Person 1 should confirm it against a live inbound event.
-- `spacetime/` stays outside the root workspace, as `NEXT_STEPS.md` requires. `packages/*` have their own lockfiles and `file:` dependencies. Root `npm ci` currently fails on lockfile drift, which Person 1 reconciles.
+- `spacetime/` stays outside the root workspace, as `NEXT_STEPS.md` requires.
 - Restarting the server with `--in-memory` loses data. For persistence, run without `--in-memory`.
 - Views use full-table `iter()`. The docs recommend indexed lookups. This is fine at demo scale and has not been load-tested.
 - Expected rejections appear as `ERROR` lines in `spacetime logs`. They are reducer `SenderError`s, not crashes.

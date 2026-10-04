@@ -8,7 +8,7 @@ import {
   type RecommendServices,
 } from "@flare/contracts";
 
-import type { AgentDataPort, ExtractionFailure } from "./data-port.js";
+import { toConversationRoute, toProviderRoute, type AgentDataPort, type ExtractionFailure } from "./data-port.js";
 import { AgentStateStore } from "./state-store.js";
 import type {
   InboundMessageHandler,
@@ -109,6 +109,7 @@ export class AgentOrchestrator {
     await this.#data.recordInbound({
       provider: message.platform,
       conversationKey: message.conversationKey,
+      route: toConversationRoute(message.route),
       messages: [
         {
           id: message.providerMessageId,
@@ -221,7 +222,8 @@ export class AgentOrchestrator {
       if (reply) {
         await reply.send(question);
       } else {
-        const route = this.#state.routeFor(conversationKey);
+        const stored = this.#data.getConversationContext(conversationKey)?.route;
+        const route = this.#state.routeFor(conversationKey) ?? (stored ? toProviderRoute(stored) : undefined);
         if (!route) throw new Error("No durable Spectrum route is available.");
         await this.#sendRoute(route, question);
       }

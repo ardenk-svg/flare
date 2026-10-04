@@ -131,6 +131,7 @@ The records above are logical responsibilities; Person 3 may combine related sto
 
 ```text
 Incident:   COLLECTING → READY_FOR_REVIEW → DISPATCHED → RESOLVED
+            COLLECTING | READY_FOR_REVIEW → CLOSED   (dispatcher, never dispatched)
 Assignment: OFFERED → ACCEPTED → EN_ROUTE → ON_SCENE → COMPLETED
 Unit:       AVAILABLE | BUSY
 Inbound:    RECEIVED → APPLIED   (handled successfully; failed attempts remain retryable)
@@ -142,8 +143,8 @@ Readiness requires a useful supported summary and nonempty `locationText`; optio
 
 ### Durable route, intake cases, and extraction state
 
-- **Durable route.** `recordInbound` stores the latest verified `ConversationRoute { platform, spaceId, line }` on the conversation. For Spectrum iMessage, `spaceId` is `space.id` and `line` is the cloud line phone (`space.phone`), or null. Reopen the destination with the platform's `space.get(spaceId, …)` after a restart. Never store callbacks or rely on an old `space` object. The route is separate from `conversationKey` and is visible only to the agent.
-- **Intake case.** Each conversation has a `caseEpoch` that starts at 1, and each inbound message records the epoch it arrived in. `resolveIncident` advances the epoch and clears the last-question fields. Context reads, evidence validation and source IDs use only current-case messages. An earlier-case source fails with `STALE_CASE`, and earlier-case evidence fails with `UNKNOWN_EVIDENCE_MESSAGE`. Earlier rows stay stored as history.
+- **Durable route.** `recordInbound` stores the latest verified `ConversationRoute { platform, spaceId, line }` on the conversation. For Spectrum iMessage, `platform` is `"imessage"` exactly as `message.platform` emits it, `spaceId` is `space.id`, and `line` is `space.phone`. On Photon's shared-pool plan, `space.phone` is the placeholder value `"shared"`. Store it unchanged: `space.get(spaceId, { phone: "shared" })` still works because shared mode ignores the phone. Reopen the destination with the platform's `space.get(spaceId, …)` after a restart. Never store callbacks or rely on an old `space` object. The route is separate from `conversationKey` and is visible only to the agent.
+- **Intake case.** Each conversation has a `caseEpoch` that starts at 1, and each inbound message records the epoch it arrived in. `resolveIncident` and `closeIncident` advance the epoch and clear the last-question fields. Context reads, evidence validation and source IDs use only current-case messages. An earlier-case source fails with `STALE_CASE`, and earlier-case evidence fails with `UNKNOWN_EVIDENCE_MESSAGE`. Earlier rows stay stored as history.
 - **Extraction state.** An incident's `extractionState` is `OK | PENDING | FAILED`.
   - Recording new input for an active incident sets `PENDING`.
   - An accepted patch or a no-patch completion sets `OK` and clears the error, unless more current-case input is still RECEIVED, in which case the state stays `PENDING`.
@@ -165,6 +166,7 @@ Person 3 implements these behavioral contracts in the data adapter and maps them
 | `confirmDispatchAndAssign` | Dispatcher | Require ready incident, explicit confirmed services and matching nonempty selected units; check availability; reserve all units; create OFFERED assignments; set DISPATCHED; queue one confirmation notification atomically |
 | `advanceAssignment` | Responder for its unit | Validate the next allowed state; update only that assignment; enqueue a notification on EN_ROUTE; release its unit on COMPLETED |
 | `resolveIncident` | Dispatcher | Require DISPATCHED and all assignments COMPLETED; set RESOLVED; end the conversation's active incident association |
+| `closeIncident` | Dispatcher | For a test text, duplicate, or report that needs no unit: require COLLECTING or READY_FOR_REVIEW with no assignments and a nonempty reason; set CLOSED with `closeReason`; end the active association and start a new case, as resolve does; queue a simulated INFO_REPLY to the caller |
 | Pending-notification subscription / `ackNotification` | Agent | Expose unsent work to the designated worker and record successful delivery/attempt errors |
 | Demo seed/reset | Authorized demo administrator | Seed units and role assignments; reset only the agreed demo environment after coordination |
 
@@ -194,9 +196,10 @@ Types live in `@flare/contracts` (`packages/contracts/src/index.ts`). Operations
 | `confirmDispatchAndAssign` | `confirmDispatchAndAssign(conn, { incidentId, confirmedServices, unitIds })` | |
 | `advanceAssignment` | `advanceAssignment(conn, { assignmentId, nextStatus })` | `nextStatus` must be the next stage |
 | `resolveIncident` | `resolveIncident(conn, { incidentId })` | |
+| `closeIncident` | `closeIncident(conn, { incidentId, reason })` | `Incident.closeReason` holds the reason |
 | Reads | `listIncidents`, `listAssignments`, `listUnits`, `getMyRole` | Role-scoped: a responder sees only its unit's assignments and their incidents |
 
-Rejected operations throw `FlareOpError` with a `code`: `UNAUTHORIZED`, `NOT_FOUND`, `STALE_REVISION`, `STALE_CASE`, `INVALID_ROUTE`, `PARTIALLY_APPLIED_SOURCES`, `UNKNOWN_MESSAGE`, `INVALID_INTENT`, `INVALID_FIELD`, `INVALID_VALUE_TYPE`, `MISSING_EVIDENCE`, `EVIDENCE_QUOTE_MISMATCH`, `UNKNOWN_EVIDENCE_MESSAGE`, `NOT_READY`, `ALREADY_DISPATCHED`, `UNIT_CONFLICT`, `UNIT_SERVICE_MISMATCH`, `SERVICE_WITHOUT_UNIT`, `INVALID_TRANSITION`, `ASSIGNMENTS_NOT_COMPLETED`, among others.
+Rejected operations throw `FlareOpError` with a `code`: `UNAUTHORIZED`, `NOT_FOUND`, `STALE_REVISION`, `STALE_CASE`, `INVALID_ROUTE`, `PARTIALLY_APPLIED_SOURCES`, `UNKNOWN_MESSAGE`, `INVALID_INTENT`, `INVALID_FIELD`, `INVALID_VALUE_TYPE`, `MISSING_EVIDENCE`, `EVIDENCE_QUOTE_MISMATCH`, `UNKNOWN_EVIDENCE_MESSAGE`, `NOT_READY`, `ALREADY_DISPATCHED`, `UNIT_CONFLICT`, `UNIT_SERVICE_MISMATCH`, `SERVICE_WITHOUT_UNIT`, `INVALID_TRANSITION`, `ASSIGNMENTS_NOT_COMPLETED`, `NOT_CLOSABLE`, `HAS_ASSIGNMENTS`, `REASON_REQUIRED`, `INCIDENT_CLOSED`, among others.
 
 Roles are `ADMIN`, `AGENT`, `DISPATCHER`, and `RESPONDER` (bound to one unit). The identity that first publishes the module becomes `ADMIN` and grants the other roles by identity. An identity without a grant sees empty views and cannot call operations.
 
