@@ -33,6 +33,12 @@ The materialized `CallerFacts` record has these fields. Unknown values are `null
 | `trappedPerson` | boolean or null |
 | `violentThreat` | boolean or null |
 | `injuryReported` | boolean or null |
+| `weaponPresent` | boolean or null; robbery, assault |
+| `suspectCount` | nonnegative integer or null; robbery, assault |
+| `callerStatus` | string or null; a short caller phrase such as "hiding", "safe", "injured" |
+| `vehicleCount` | nonnegative integer or null; traffic collisions |
+| `patientAge` | nonnegative integer or null; medical, as reported |
+| `roadBlocked` | boolean or null; traffic |
 
 These are caller reports, not verified observations. Ambiguous language stays unresolved; do not infer consciousness or breathing from a vague phrase. Coordinates are outside the baseline. A typed location must not produce invented coordinates.
 
@@ -126,6 +132,8 @@ Null/missing facts match no rule. If none match, return an empty list with the r
 | Conversation | Internal conversation key, durable provider route, current case epoch, active incident ID, last sent question/delivery state |
 | Inbound message | Private conversation/message key, case epoch, text, received timestamp, processing state/error, applied timestamp |
 | Notification | ID, destination conversation, incident/assignment reference, event kind, committed event data, delivery attempts/status |
+| Outbound message | Agent text actually sent or failed (questions, delivered or failed notifications), with its case and incident, for the dispatcher transcript |
+| Incident event | Append-only activity log entry: kind, commit time, optional unit, fields, services, short detail. It never holds message text |
 
 The records above are logical responsibilities; Person 3 may combine related storage when that simplifies the module without changing behavior. Do not duplicate private raw-message data into public subscription tables.
 
@@ -137,7 +145,7 @@ Unit:       AVAILABLE | BUSY
 Inbound:    RECEIVED → APPLIED   (handled successfully; failed attempts remain retryable)
 ```
 
-Readiness requires a useful supported summary and nonempty `locationText`; optional caller facts may stay unknown. Before dispatch, accepted intake may move readiness in either direction if a correction removes location. After dispatch, keep the lifecycle intact and flag material fact changes for review. Recompute recommendations, but do not silently alter confirmed services or units.
+Readiness requires a useful supported summary and a known location: a nonempty `locationText` or a provider-shared location; optional caller facts may stay unknown. Before dispatch, accepted intake may move readiness in either direction if a correction removes location. After dispatch, keep the lifecycle intact and flag material fact changes for review. Recompute recommendations, but do not silently alter confirmed services or units.
 
 `intakeRevision` advances on accepted extraction results, including an accepted empty patch, and is separate from assignment/lifecycle updates. A status question alone need not advance it. Person 1 serializes extraction per conversation; Person 3 rejects stale expected revisions. On rejection, reload current context and retry the still-unapplied messages. Reserving an input for processing or recording a failure must not mark it APPLIED.
 
@@ -150,6 +158,12 @@ Readiness requires a useful supported summary and nonempty `locationText`; optio
   - An accepted patch or a no-patch completion sets `OK` and clears the error, unless more current-case input is still RECEIVED, in which case the state stays `PENDING`.
   - `recordExtractionFailure` sets `FAILED` with a sanitized error and leaves facts unchanged.
   - When the first report fails before any incident exists, the failure appears as `lastExtractionError` in the agent's context.
+- **Shared location.** `recordSharedLocation` is agent-only. It stores a provider-supplied pin or Find My location as `Incident.sharedLocation` (`latitude`, `longitude`, `accuracyMeters`, `label`, `source` `IMESSAGE_PIN | FIND_MY`, `sharedAt`). If the conversation has no active incident, it opens a partial one. It does not change caller facts or `intakeRevision`. Duplicate provider message IDs are no-ops. The pin is stored as an APPLIED caller message, `[Shared location: <label>]`, so it shows in the transcript. Never derive coordinates from caller prose.
+- **Dispatcher console reads.**
+  - `incident_conversation_view` (dispatcher only) returns the current case's caller messages and agent messages for each incident, latest 50, as `ConversationMessage` rows.
+  - Questions are recorded by `recordSentQuestion`. Each notification gets one row, written when `ackNotification` reports it delivered or failed.
+  - `incident_event_view` (dispatcher only) returns the activity log. Event kinds: `INCIDENT_CREATED`, `CALLER_MESSAGE`, `FACTS_UPDATED`, `LOCATION_RECEIVED`, `SERVICES_RECOMMENDED`, `EXTRACTION_FAILED`, `DISPATCH_CONFIRMED`, `UNIT_ASSIGNED`, `UNIT_ACCEPTED`, `UNIT_EN_ROUTE`, `UNIT_ON_SCENE`, `UNIT_COMPLETED`, `CALLER_NOTIFIED`, `INCIDENT_RESOLVED`, `INCIDENT_CLOSED`.
+  - Neither view exposes conversation keys, routes, extraction errors, or model output that was never sent.
 - **Startup work.** After reconnecting, the agent drains `listPendingConversationContexts` (current-case RECEIVED input) and `listPendingNotifications` (unsent jobs). Both carry the route.
 
 ## Application operations
@@ -198,8 +212,10 @@ Types live in `@flare/contracts` (`packages/contracts/src/index.ts`). Operations
 | `resolveIncident` | `resolveIncident(conn, { incidentId })` | |
 | `closeIncident` | `closeIncident(conn, { incidentId, reason })` | `Incident.closeReason` holds the reason |
 | Reads | `listIncidents`, `listAssignments`, `listUnits`, `getMyRole` | Role-scoped: a responder sees only its unit's assignments and their incidents |
+| Shared location | `recordSharedLocation(conn, { provider, conversationKey, route, messageId, receivedAt, latitude, longitude, accuracyMeters?, label?, source })` | Agent only |
+| Console reads | `listConversation(conn, incidentId)`, `listIncidentEvents(conn, incidentId)` | Dispatcher only, oldest first |
 
-Rejected operations throw `FlareOpError` with a `code`: `UNAUTHORIZED`, `NOT_FOUND`, `STALE_REVISION`, `STALE_CASE`, `INVALID_ROUTE`, `PARTIALLY_APPLIED_SOURCES`, `UNKNOWN_MESSAGE`, `INVALID_INTENT`, `INVALID_FIELD`, `INVALID_VALUE_TYPE`, `MISSING_EVIDENCE`, `EVIDENCE_QUOTE_MISMATCH`, `UNKNOWN_EVIDENCE_MESSAGE`, `NOT_READY`, `ALREADY_DISPATCHED`, `UNIT_CONFLICT`, `UNIT_SERVICE_MISMATCH`, `SERVICE_WITHOUT_UNIT`, `INVALID_TRANSITION`, `ASSIGNMENTS_NOT_COMPLETED`, `NOT_CLOSABLE`, `HAS_ASSIGNMENTS`, `REASON_REQUIRED`, `INCIDENT_CLOSED`, among others.
+Rejected operations throw `FlareOpError` with a `code`: `UNAUTHORIZED`, `NOT_FOUND`, `STALE_REVISION`, `STALE_CASE`, `INVALID_ROUTE`, `PARTIALLY_APPLIED_SOURCES`, `UNKNOWN_MESSAGE`, `INVALID_INTENT`, `INVALID_FIELD`, `INVALID_VALUE_TYPE`, `MISSING_EVIDENCE`, `EVIDENCE_QUOTE_MISMATCH`, `UNKNOWN_EVIDENCE_MESSAGE`, `NOT_READY`, `ALREADY_DISPATCHED`, `UNIT_CONFLICT`, `UNIT_SERVICE_MISMATCH`, `SERVICE_WITHOUT_UNIT`, `INVALID_TRANSITION`, `ASSIGNMENTS_NOT_COMPLETED`, `NOT_CLOSABLE`, `HAS_ASSIGNMENTS`, `REASON_REQUIRED`, `INCIDENT_CLOSED`, `INVALID_LATITUDE`, `INVALID_LONGITUDE`, `INVALID_ACCURACY`, `INVALID_LOCATION_SOURCE`, among others.
 
 Roles are `ADMIN`, `AGENT`, `DISPATCHER`, and `RESPONDER` (bound to one unit). The identity that first publishes the module becomes `ADMIN` and grants the other roles by identity. An identity without a grant sees empty views and cannot call operations.
 
@@ -213,7 +229,7 @@ Roles are `ADMIN`, `AGENT`, `DISPATCHER`, and `RESPONDER` (bound to one unit). T
 6. Responder accepts then moves EN_ROUTE. Both authorized web clients receive the change. The caller receives clearly labelled simulated status messages.
 7. Caller: “Any update?” → report the committed mock assignment state; do not create a new incident or call it real dispatch.
 
-Seed `FIRE-01`, `EMS-01`, and `POLICE-01`. Add a separate synthetic trapped-person fixture when testing multi-assignment behavior; it matches `DEMO_TRAPPED`, so completing one assignment must leave the other intact. Test negative and unknown signals separately rather than adding unexplained services to the main demo.
+Seed two mock units per service: `FIRE-01/02`, `EMS-01/02`, `POLICE-01/02`. There are no unit locations or ETAs, and the UI must not invent them. Add a separate synthetic trapped-person fixture when testing multi-assignment behavior; it matches `DEMO_TRAPPED`, so completing one assignment must leave the other intact. Test negative and unknown signals separately rather than adding unexplained services to the main demo.
 
 ## Integration checks
 

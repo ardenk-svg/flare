@@ -43,6 +43,12 @@ export const CallerFacts = __t.object("CallerFacts", {
   trappedPerson: __t.option(__t.bool()),
   violentThreat: __t.option(__t.bool()),
   injuryReported: __t.option(__t.bool()),
+  weaponPresent: __t.option(__t.bool()),
+  suspectCount: __t.option(__t.u32()),
+  callerStatus: __t.option(__t.string()),
+  vehicleCount: __t.option(__t.u32()),
+  patientAge: __t.option(__t.u32()),
+  roadBlocked: __t.option(__t.bool()),
 });
 export type CallerFacts = __Infer<typeof CallerFacts>;
 
@@ -76,6 +82,16 @@ export const ConversationContextRow = __t.object("ConversationContextRow", {
   routeLine: __t.option(__t.string()),
 });
 export type ConversationContextRow = __Infer<typeof ConversationContextRow>;
+
+export const ConversationMessageRow = __t.object("ConversationMessageRow", {
+  key: __t.string(),
+  incidentId: __t.u64(),
+  sender: __t.string(),
+  text: __t.string(),
+  at: __t.timestamp(),
+  delivery: __t.option(__t.string()),
+});
+export type ConversationMessageRow = __Infer<typeof ConversationMessageRow>;
 
 export const EvidenceInput = __t.object("EvidenceInput", {
   field: __t.string(),
@@ -161,8 +177,29 @@ export const Incident = __t.object("Incident", {
   createdAt: __t.timestamp(),
   updatedAt: __t.timestamp(),
   closeReason: __t.option(__t.string()),
+  get sharedLocation() {
+    return __t.option(SharedLocation);
+  },
 });
 export type Incident = __Infer<typeof Incident>;
+
+export const IncidentConversationView = __t.object("IncidentConversationView", {});
+export type IncidentConversationView = __Infer<typeof IncidentConversationView>;
+
+export const IncidentEvent = __t.object("IncidentEvent", {
+  id: __t.u64(),
+  incidentId: __t.u64(),
+  kind: __t.string(),
+  at: __t.timestamp(),
+  unitId: __t.option(__t.string()),
+  fields: __t.array(__t.string()),
+  services: __t.array(__t.string()),
+  detail: __t.option(__t.string()),
+});
+export type IncidentEvent = __Infer<typeof IncidentEvent>;
+
+export const IncidentEventView = __t.object("IncidentEventView", {});
+export type IncidentEventView = __Infer<typeof IncidentEventView>;
 
 export const IncidentView = __t.object("IncidentView", {});
 export type IncidentView = __Infer<typeof IncidentView>;
@@ -185,6 +222,19 @@ export const Notification = __t.object("Notification", {
   sentAt: __t.option(__t.timestamp()),
 });
 export type Notification = __Infer<typeof Notification>;
+
+export const OutboundMessage = __t.object("OutboundMessage", {
+  id: __t.u64(),
+  conversationId: __t.u64(),
+  caseEpoch: __t.u32(),
+  incidentId: __t.option(__t.u64()),
+  notificationId: __t.option(__t.u64()),
+  kind: __t.string(),
+  text: __t.string(),
+  delivery: __t.string(),
+  at: __t.timestamp(),
+});
+export type OutboundMessage = __Infer<typeof OutboundMessage>;
 
 export const PendingNotificationRow = __t.object("PendingNotificationRow", {
   id: __t.u64(),
@@ -223,6 +273,16 @@ export const RouteInput = __t.object("RouteInput", {
   line: __t.option(__t.string()),
 });
 export type RouteInput = __Infer<typeof RouteInput>;
+
+export const SharedLocation = __t.object("SharedLocation", {
+  latitude: __t.f64(),
+  longitude: __t.f64(),
+  accuracyMeters: __t.option(__t.f64()),
+  label: __t.option(__t.string()),
+  source: __t.string(),
+  sharedAt: __t.timestamp(),
+});
+export type SharedLocation = __Infer<typeof SharedLocation>;
 
 export const StoredEvidence = __t.object("StoredEvidence", {
   field: __t.string(),

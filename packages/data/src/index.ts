@@ -11,6 +11,10 @@ import {
   type CallerFacts,
   type CallerMessage,
   type ConversationContext,
+  type ConversationMessage,
+  type IncidentEvent,
+  type IncidentEventKind,
+  type LocationSource,
   type ConversationRoute,
   type ExtractionState,
   type ExtractionOutcome,
@@ -47,6 +51,8 @@ export const ALL_VIEWS = [
   tables.agentConversation,
   tables.agentInbound,
   tables.agentNotification,
+  tables.incidentConversationView,
+  tables.incidentEventView,
 ];
 
 // ---- Errors ----
@@ -102,6 +108,16 @@ export function toIncident(row: IncidentRow): Incident {
     extractionError: nul(row.extractionError),
     caseEpoch: row.caseEpoch,
     closeReason: nul(row.closeReason),
+    sharedLocation: row.sharedLocation
+      ? {
+          latitude: row.sharedLocation.latitude,
+          longitude: row.sharedLocation.longitude,
+          accuracyMeters: nul(row.sharedLocation.accuracyMeters),
+          label: nul(row.sharedLocation.label),
+          source: row.sharedLocation.source as LocationSource,
+          sharedAt: toIso(row.sharedLocation.sharedAt),
+        }
+      : null,
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
   };
@@ -197,6 +213,45 @@ export const listAssignments = (conn: DbConnection): Assignment[] =>
 export const listUnits = (conn: DbConnection): Unit[] =>
   [...conn.db.unitView.iter()].map(toUnit).sort((a, b) => a.id.localeCompare(b.id));
 
+// ---- Dispatcher console reads ----
+
+/** Current-case caller and agent messages for an incident, oldest first (latest 50). Dispatcher only. */
+export function listConversation(conn: DbConnection, incidentId: string): ConversationMessage[] {
+  const id = fromId(incidentId);
+  return [...conn.db.incidentConversationView.iter()]
+    .filter(r => r.incidentId === id)
+    .sort((a, b) => {
+      const d = a.at.microsSinceUnixEpoch - b.at.microsSinceUnixEpoch;
+      return d < 0n ? -1 : d > 0n ? 1 : a.key.localeCompare(b.key);
+    })
+    .map(r => ({
+      key: r.key,
+      incidentId,
+      sender: r.sender as ConversationMessage['sender'],
+      text: r.text,
+      at: toIso(r.at),
+      delivery: nul(r.delivery) as ConversationMessage['delivery'],
+    }));
+}
+
+/** Activity log for an incident, oldest first. Dispatcher only. */
+export function listIncidentEvents(conn: DbConnection, incidentId: string): IncidentEvent[] {
+  const id = fromId(incidentId);
+  return [...conn.db.incidentEventView.iter()]
+    .filter(e => e.incidentId === id)
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map(e => ({
+      id: toId(e.id),
+      incidentId,
+      kind: e.kind as IncidentEventKind,
+      at: toIso(e.at),
+      unitId: nul(e.unitId),
+      fields: e.fields as CallerFactField[],
+      services: e.services as Service[],
+      detail: nul(e.detail),
+    }));
+}
+
 // ---- Agent operations ----
 
 const RECENT_LIMIT = 10;
@@ -290,6 +345,42 @@ export function recordExtractionFailure(
       messageIds: input.messageIds,
       code: input.error.code,
       message: input.error.message,
+    })
+  );
+}
+
+/**
+ * Records a provider-shared location (pin or Find My) for the conversation. Sets it on the active
+ * incident or opens a partial one. Counts as a known location for READY_FOR_REVIEW. Duplicate
+ * message IDs are no-ops. Never derive coordinates from caller prose.
+ */
+export function recordSharedLocation(
+  conn: DbConnection,
+  input: {
+    provider: string;
+    conversationKey: string;
+    route: ConversationRoute;
+    messageId: string;
+    receivedAt: string;
+    latitude: number;
+    longitude: number;
+    accuracyMeters?: number | null;
+    label?: string | null;
+    source: LocationSource;
+  }
+): Promise<void> {
+  return call(
+    conn.reducers.recordSharedLocation({
+      provider: input.provider,
+      conversationKey: input.conversationKey,
+      route: { platform: input.route.platform, spaceId: input.route.spaceId, line: input.route.line ?? undefined },
+      messageId: input.messageId,
+      receivedAt: fromIso(input.receivedAt),
+      latitude: input.latitude,
+      longitude: input.longitude,
+      accuracyMeters: input.accuracyMeters ?? undefined,
+      label: input.label ?? undefined,
+      source: input.source,
     })
   );
 }
