@@ -80,10 +80,10 @@ export function AssignmentStatusChip({ status }: { status: AssignmentStatus }) {
 }
 
 /** OFFERED → ACCEPTED → EN_ROUTE → ON_SCENE → COMPLETED, with the current step named for screen readers. */
-export function AssignmentStepper({ status }: { status: AssignmentStatus }) {
+export function AssignmentStepper({ status, large = false }: { status: AssignmentStatus; large?: boolean }) {
   const cur = ASSIGNMENT_ORDER.indexOf(status);
   return (
-    <ol className="stepper" aria-label="Assignment progress">
+    <ol className={`stepper ${large ? "large" : ""}`} aria-label="Assignment progress">
       {ASSIGNMENT_ORDER.map((s, i) => {
         const state = i < cur || status === "COMPLETED" ? "done" : i === cur ? "current" : "";
         return (

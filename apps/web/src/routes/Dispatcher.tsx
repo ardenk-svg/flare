@@ -27,14 +27,27 @@ function useFreshIds(ids: string[]) {
   return fresh;
 }
 
+// Per-viewer preference only; storage can be unavailable (private window, blocked site data).
+const SHOW_DONE_KEY = "flare-dispatcher-show-done";
+function useShowDone() {
+  const [show, setShow] = useState(() => { try { return localStorage.getItem(SHOW_DONE_KEY) === "1"; } catch { return false; } });
+  const toggle = () => setShow((v) => {
+    try { localStorage.setItem(SHOW_DONE_KEY, v ? "0" : "1"); } catch { /* keep in memory only */ }
+    return !v;
+  });
+  return [show, toggle] as const;
+}
+
 export default function Dispatcher() {
   const { incidents, units, assignments, connection } = useSnapshot();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showDone, toggleDone] = useShowDone();
   const fresh = useFreshIds(incidents.map((i) => i.id));
 
   const active = incidents.filter((i) => !isDone(i)).sort(byPriority);
   const resolved = incidents.filter(isDone).sort(byNewest);
-  const incident = incidents.find((i) => i.id === selectedId) ?? active[0] ?? resolved[0];
+  // Hidden resolved/closed incidents can't stay selected; the detail falls back to the top active one.
+  const incident = incidents.find((i) => i.id === selectedId && (showDone || !isDone(i))) ?? active[0] ?? (showDone ? resolved[0] : undefined);
   const offline = connection !== "connected";
   const row = (i: IncidentView) => (
     <IncidentListItem key={i.id} incident={i} selected={i.id === incident?.id} fresh={fresh.has(i.id)} onSelect={() => setSelectedId(i.id)} />
@@ -50,15 +63,17 @@ export default function Dispatcher() {
             ? <p className="empty small">No active incidents. New caller reports show up here.</p>
             : <ul className="queue-list">{active.map(row)}</ul>}
           {resolved.length > 0 && (
-            <details className="resolved-group" open={(incident && isDone(incident)) || undefined}>
-              <summary>Resolved and closed ({resolved.length})</summary>
-              <ul className="queue-list">{resolved.map(row)}</ul>
-            </details>
+            <div className="resolved-group">
+              <button className="resolved-toggle" aria-expanded={showDone} aria-controls="resolved-list" onClick={toggleDone}>
+                <Icon name="chevron" />{showDone ? "Hide" : "Show"} resolved and closed ({resolved.length})
+              </button>
+              {showDone && <ul id="resolved-list" className="queue-list">{resolved.map(row)}</ul>}
+            </div>
           )}
         </aside>
 
         <main className="detail">
-          {!incident ? <div className="empty">{incidents.length ? "Select an incident to review." : "No active incidents. Waiting for a caller to text Flare."}</div> : (
+          {!incident ? <div className="empty">{incidents.length ? "No active incidents. Resolved and closed incidents are hidden." : "No active incidents. Waiting for a caller to text Flare."}</div> : (
             <>
               <IncidentHeader incident={incident} />
               {incident.needsReview && (
