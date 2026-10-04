@@ -135,3 +135,10 @@ Verification: root check passed 99 tests plus typechecks/build; 143 live adapter
 - Essentials card: incident type, priority, and chips only for reported alarming facts (violent threat, weapon, suspect count, fire, trapped, not breathing/conscious, injury, caller status), plus the summary. Other known facts and the unknown list sit in a collapsed "Additional incident details".
 - Location card (shared by both views): map when the caller shared coordinates, labelled with its source and "unverified"; typed text otherwise, labelled "Caller typed location · unverified" with no map. Coordinates are never invented.
 - Checks: `npm run typecheck -w @flare/web`, `npm test -w @flare/web` (9/9), `npm run build -w @flare/web` pass. **Not done:** visual browser pass (extension unavailable); check 1440px and phone width by eye.
+
+## Light/dark theme toggle (2026-10-04)
+
+- A sun/moon button at the right of the top bar switches themes. With no saved choice, the page follows the OS setting and tracks OS changes live. A click saves `light` or `dark` in `localStorage` key `flare-theme` (try/catch; falls back to this page load only).
+- `index.html` applies the saved theme before first paint, so there's no flash of the wrong theme.
+- `styles.css`: every hard-coded color is now a token on `:root`. Dark values are declared under `@media (prefers-color-scheme: dark)` for `:root:not([data-theme="light"])` and again for `:root[data-theme="dark"]`. Map tiles are dimmed in dark mode. The pin keeps its white fill because it always sits on map tiles.
+- Checks: `npm run typecheck -w @flare/web`, `npm test -w @flare/web` (9/9), `npm run build -w @flare/web` pass. **Not done:** visual pass in both themes (browser extension unavailable). Check chip, notice and severity contrast in dark mode by eye.
