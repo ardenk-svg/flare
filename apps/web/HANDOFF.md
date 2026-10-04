@@ -61,7 +61,7 @@ Cross-client checks pass only when an update arrives by subscription, since the 
 
 ## Live mode in the browser
 1. Setup above, then `cd apps/web && cp .env.example .env.local && npm run dev`.
-2. Open `/dispatcher` and `/responder` side by side in one browser profile. Each route keeps its own identity token in `localStorage`: `flare-live-token:dispatcher`, `flare-live-token:responder`, or `flare-live-token:responder:<UNIT>` when the URL has `?unit=<UNIT>` (use it to run a second responder tab). The dispatcher falls back once to the old single key `flare-live-token`, so an identity granted before this change keeps its role. A new identity shows "no role yet" with its hex. Grant it: `spacetime call --server local flare-dev grant_role <hex> DISPATCHER '{"none":[]}'` or `... RESPONDER '{"some":"FIRE-01"}'`. The page updates without reload. The fixture-only "Responder (EMS-01)" nav link is hidden in live mode.
+2. Open `/dispatcher` and `/responder` side by side in one browser profile. Each route keeps its own identity token in `localStorage`: `flare-live-token:dispatcher` or `flare-live-token:responder:<UNIT>`. `/responder` defaults to FIRE-01 and reuses the old `flare-live-token:responder` token once if the new scoped token is missing. The dispatcher falls back once to the old single key `flare-live-token`. A new identity shows "no role yet" with its hex. Outside the local runner, grant it: `spacetime call --server local flare-dev grant_role <hex> DISPATCHER '{"none":[]}'` or `... RESPONDER '{"some":"FIRE-01"}'`. The Unit picker gives EMS, police and fire separate identities. `npm run e2e` opens exactly one tab for each role and automatically authorizes the selected responder unit.
 
 ## Interfaces
 - `src/types.ts` re-exports `Service`, `IncidentStatus`, `AssignmentStatus`, `CallerFacts`, `Evidence`, `Unit`, `Assignment`, `ExtractionState`, and `ASSIGNMENT_ORDER` from `@flare/contracts`. `IncidentView`, `Snapshot`, `FlareClient`, and `OpResult` are UI-level.
@@ -100,7 +100,19 @@ Cross-client checks pass only when an update arrives by subscription, since the 
 - **Not done:** no visual browser pass yet. Check 13–16" widths, the map tiles, focus rings, and the conversation dialog by eye.
 
 ## Unresolved / needs others
-- **Root `npm run check` fails on main in `apps/agent`, not the web app.** Person 1's merged orchestrator predates Person 3's contract change: `data-port.ts` omits `route` in `recordInbound`, and the agent test fixtures lack `route`, `extractionState`, and `caseEpoch`. Person 1 needs to rebase.
+- The earlier agent/contract mismatch is repaired; root `npm run check` passed on 2026-10-04.
 - Reconnect was tested by closing a client and reconnecting with the same token. Losing the server mid-session hasn't been tested, because an `--in-memory` restart wipes data. Test it on a persistent database.
 - Not yet run against the shared Maincloud database. Person 3 hasn't announced it yet.
+
+## Dispatcher takeover and all services (2026-10-04)
+
+The conversation panel now claims/relinquishes control and lets its owning dispatcher compose messages. It disables actions offline or for ended incidents, blocks other dispatchers, preserves a failed draft, deduplicates send retries, and resets the draft when switching incidents. QUEUED/SENT/FAILED delivery and DISPATCHER attribution come from committed data. The agent continues fact extraction and unit updates while questions pause. The responder mission header shows its service, and the Unit picker supports all six seeded units.
+
+Root checks passed (9 web helper tests plus typecheck/build); the isolated agent/database harness passed takeover ownership/privacy/delivery and full Fire, EMS and Police lifecycles. A manual fixture browser pass verified Take over → composer → Send message → DISPATCHER transcript → Return to agent. The capture is in ignored `.flare/screenshots/dispatcher-takeover.jpg`. This UI pass used fixture delivery; no real caller message was sent by the browser test.
 - Responder evidence stays hidden in the UI. Confirm which projection fields responders may see.
+
+## Single responder tab (2026-10-04)
+
+The local e2e runner supplies a temporary dev-only responder authorization callback. Vite proxies `POST /__flare_demo/responder` to an ephemeral loopback server. A per-run capability header and matching browser origin are required; only seeded units and connected identities without an existing role can receive RESPONDER. It cannot replace existing dispatcher/admin/different-unit grants. Production builds and ordinary web startup do not enable this bridge. Tokens stay per unit; no identity token is placed in a URL or passed from the runner.
+
+Manual browser verification on an isolated SpacetimeDB: one dispatcher and one responder tab; switched the same responder through FIRE-01/02, EMS-01/02 and POLICE-01/02, then returned to a previously authorized unit. All displayed the correct committed role/unit. Capture: ignored `.flare/screenshots/one-responder-dropdown.jpg`. Root checks and the local bridge origin/capability/unit checks passed.

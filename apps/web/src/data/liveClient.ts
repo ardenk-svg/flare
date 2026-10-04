@@ -3,6 +3,7 @@
 import {
   advanceAssignment, closeIncident, confirmDispatchAndAssign, connectFlare, FlareOpError, getMyRole,
   listAssignments, listConversation, listIncidentEvents, listIncidents, listUnits, resolveIncident, type FlareConnection,
+  getConversationController, takeOverConversation, releaseConversation, sendDispatcherMessage,
 } from "@flare/data";
 import type { Incident } from "@flare/contracts";
 import type {
@@ -15,6 +16,8 @@ export interface LiveConfig {
   database: string;
   /** Where this client's identity token lives. Defaults to `browserTokenStore("default")`. */
   tokenStore?: TokenStore;
+  /** Present only in the local e2e demo; grants this browser's requested unit. */
+  authorizeDemoResponder?: (identity: string) => Promise<void>;
 }
 
 const LEGACY_TOKEN_KEY = "flare-live-token";
@@ -23,12 +26,15 @@ const LEGACY_TOKEN_KEY = "flare-live-token";
  * so both routes can hold distinct identities in one browser profile. `legacyFallback` reads the old
  * single key once, so a dispatcher identity granted before per-role keys is kept.
  */
-export function browserTokenStore(scope: string, { legacyFallback = false } = {}): TokenStore {
+export function browserTokenStore(scope: string, { legacyFallback = false, fallbackScope }: { legacyFallback?: boolean; fallbackScope?: string } = {}): TokenStore {
   const key = `${LEGACY_TOKEN_KEY}:${scope}`;
   return {
     get: () => {
       try {
-        return localStorage.getItem(key) ?? (legacyFallback ? localStorage.getItem(LEGACY_TOKEN_KEY) ?? undefined : undefined);
+        return localStorage.getItem(key)
+          ?? (fallbackScope ? localStorage.getItem(`${LEGACY_TOKEN_KEY}:${fallbackScope}`) : undefined)
+          ?? (legacyFallback ? localStorage.getItem(LEGACY_TOKEN_KEY) : undefined)
+          ?? undefined;
       } catch { return undefined; }
     },
     set: (t) => { try { localStorage.setItem(key, t); } catch { /* ignore */ } },
@@ -59,6 +65,7 @@ function toView(i: Incident, conn: FlareConnection["conn"]): IncidentView {
     recommendedServices: i.recommendedServices, recommendationReason: i.recommendationReason,
     ruleIds: i.recommendationRuleIds, confirmedServices: i.confirmedServices,
     needsReview: i.needsReview, closeReason: i.closeReason, sharedLocation: i.sharedLocation,
+    dispatcherIdentity: getConversationController(conn, i.id),
     ...(conversation.length ? { conversation } : {}),
     ...(events.length ? { events } : {}),
     extraction: toExtraction(i),
@@ -112,11 +119,16 @@ export function createLiveClient(cfg: LiveConfig): LiveClient {
       if (closed) { c.conn.disconnect(); return; }
       attempt = 0; live = c; tokens.set(c.token);
       const db = c.conn.db;
-      for (const t of [db.incidentView, db.assignmentView, db.unitView, db.myRole, db.incidentConversationView, db.incidentEventView]) {
+      for (const t of [db.incidentView, db.assignmentView, db.unitView, db.myRole, db.incidentConversationView, db.incidentEventView, db.conversationControlView]) {
         t.onInsert(refresh); t.onUpdate(refresh); t.onDelete(refresh);
       }
       set({ connection: "connected", connectError: undefined });
       refresh();
+      if (!getMyRole(c.conn) && cfg.authorizeDemoResponder) {
+        void cfg.authorizeDemoResponder(c.identityHex).then(refresh).catch(() => {
+          set({ connectError: "The local demo could not authorize this responder unit." });
+        });
+      }
     }).catch((e) => {
       set({ connection: "disconnected", connectError: e instanceof Error ? e.message : String(e) });
       scheduleRetry();
@@ -147,6 +159,9 @@ export function createLiveClient(cfg: LiveConfig): LiveClient {
     advanceAssignment: ({ assignmentId, next }) => run((c) => advanceAssignment(c.conn, { assignmentId, nextStatus: next })),
     resolveIncident: (req) => run((c) => resolveIncident(c.conn, req)),
     closeIncident: (req) => run((c) => closeIncident(c.conn, req)),
+    takeOverConversation: req => run(c => takeOverConversation(c.conn, req)),
+    releaseConversation: req => run(c => releaseConversation(c.conn, req)),
+    sendDispatcherMessage: req => run(c => sendDispatcherMessage(c.conn, req)),
     close() {
       closed = true;
       clearTimeout(retryTimer);

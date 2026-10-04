@@ -5,7 +5,7 @@ import { AccessGate, ConnectionStatus, Icon, IdentityBadge, SimBanner } from "./
 import { useSnapshot } from "./data";
 
 // Seeded by the SpacetimeDB module's init; used until the backend's unit list arrives (or if this identity can't read it).
-const SEEDED_UNITS = ["FIRE-01", "EMS-01", "POLICE-01"];
+const SEEDED_UNITS = ["FIRE-01", "FIRE-02", "EMS-01", "EMS-02", "POLICE-01", "POLICE-02"];
 
 // Picks which responder unit to view. Navigates with a full reload because the identity is chosen per page load;
 // in live mode each unit gets its own browser identity, which the operator grants once.

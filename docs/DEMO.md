@@ -6,7 +6,7 @@
 
 - [ ] Phone with the integration iMessage thread open, dispatcher view, and responder view are all visible together.
 - [ ] Dispatcher and responder use **separate authorized identities** (separate browser profiles or devices).
-- [ ] Demo database reset and seeded with `FIRE-01`, `EMS-01` and `POLICE-01`, all AVAILABLE. Person 3 announces the reset.
+- [ ] Demo database reset and seeded with two units each for FIRE, EMS and POLICE, all AVAILABLE. Person 3 announces the reset.
 - [ ] One designated agent process is running on the shared inbox. `GEMINI_MODEL` = `________` (the tested ID).
 - [ ] Backup video is ready in case live networking fails. Say so if it is used.
 
@@ -54,7 +54,7 @@ Person 2 evidence, checked separately before the sequence above:
 
 ## Known limitations to state honestly
 
-- Typed location only. There are no coordinates, maps or routing.
+- Location pins and explicit Maps coordinates are supported. Find My cards use the caller-specific Photon lookup; cached snapshots are labelled and retain their capture time when supplied. A successful sharing request is not proof of coordinates or fresh GPS. The worker does not geocode addresses or compute routes.
 - Demo rules are synthetic, not triage guidance.
 - A crash between sending a message and acknowledging it can deliver the message twice. Delivery is not exactly-once.
 - Fixture and offline runs are labelled as such and do not demonstrate live integrations.

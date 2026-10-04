@@ -18,6 +18,7 @@ import {
   onNotification,
   recordExtractionFailure,
   recordInbound,
+  recordSharedLocation,
   recordSentQuestion,
   type FlareConnection,
 } from "@flare/data";
@@ -39,6 +40,7 @@ export const toProviderRoute = (route: ConversationRoute): ProviderRoute => ({
 export type ExtractionFailure = Extract<ExtractionOutcome, { ok: false }>['error'];
 
 export interface AgentDataPort {
+  recordSharedLocation(input: Parameters<typeof recordSharedLocation>[1]): Promise<void>;
   recordInbound(input: {
     provider: string;
     conversationKey: string;
@@ -84,6 +86,7 @@ export interface AgentDataPort {
 export function createAgentDataPort(connection: FlareConnection): AgentDataPort {
   const { conn } = connection;
   return {
+    recordSharedLocation: (input) => recordSharedLocation(conn, input),
     recordInbound: (input) => recordInbound(conn, input),
     getConversationContext: (conversationKey) => getConversationContext(conn, conversationKey),
     recordExtractionFailure: (input) => recordExtractionFailure(conn, input),

@@ -40,7 +40,7 @@ The materialized `CallerFacts` record has these fields. Unknown values are `null
 | `patientAge` | nonnegative integer or null; medical, as reported |
 | `roadBlocked` | boolean or null; traffic |
 
-These are caller reports, not verified observations. Ambiguous language stays unresolved; do not infer consciousness or breathing from a vague phrase. Coordinates are outside the baseline. A typed location must not produce invented coordinates.
+These are caller reports, not verified observations. Ambiguous language stays unresolved; do not infer consciousness or breathing from a vague phrase. Coordinates come only from the separate provider-shared location operation. A typed location must not produce invented coordinates.
 
 `CallerFactPatch` has the same field names, each optional and nullable. Omitted means retain the stored value, null explicitly clears a claim to unknown/unresolved, and false requires an explicit negative. A correction replaces the previous caller claim with new evidence. Merge the patch into current facts before calculating recommendations.
 
@@ -59,6 +59,7 @@ interface CallerMessage {
 }
 
 interface InboundTurn {
+  hasSharedLocation?: boolean; // trusted presence only; no coordinates enter extraction
   conversationKey: string; // trusted internal routing key
   intakeRevision: number;
   messages: CallerMessage[];       // new ordered caller messages
@@ -106,6 +107,8 @@ Validate field types, exact source quotes, and message IDs against the supplied 
 `STATUS_QUERY` returns no fact changes. The orchestrator responds from committed state; it may implement an obvious status-query shortcut before calling Gemini. If there is no active incident, say so without creating one. `OTHER` must not create an incident by itself. Complete these messages through `completeInboundWithoutPatch` so they do not replay after restart; do not call `applyIntakePatch` for them. A report/correction with no existing active incident can create a partial incident after successful validation; keep only one active incident per conversation for the MVP.
 
 The orchestrator selects at most one relevant clarification from `proposedQuestion`, known facts and the last question. Do not repeatedly ask after an explicit unknown response. Persist the actual sent question and its delivery state as conversation context. Extraction failure returns a typed failure from the wrapper, not a fabricated successful result: keep the input available for retry and preserve verified facts.
+
+Provider pins remain separate from typed `locationText`. Pass only their presence as `hasSharedLocation` to extraction and suppress redundant address/location questions at delivery when either a pin or typed location is already committed. If the one-phone Find My share predates the initial report, wait for its scoped snapshot before deciding to ask; use a distinct provider message ID for that snapshot so it does not collide with the report's dedupe key. Do not automatically carry a previous case's share into a new case.
 
 ## Demonstration rules
 
@@ -158,7 +161,10 @@ Readiness requires a useful supported summary and a known location: a nonempty `
   - An accepted patch or a no-patch completion sets `OK` and clears the error, unless more current-case input is still RECEIVED, in which case the state stays `PENDING`.
   - `recordExtractionFailure` sets `FAILED` with a sanitized error and leaves facts unchanged.
   - When the first report fails before any incident exists, the failure appears as `lastExtractionError` in the agent's context.
-- **Shared location.** `recordSharedLocation` is agent-only. It stores a provider-supplied pin or Find My location as `Incident.sharedLocation` (`latitude`, `longitude`, `accuracyMeters`, `label`, `source` `IMESSAGE_PIN | FIND_MY`, `sharedAt`). If the conversation has no active incident, it opens a partial one. It does not change caller facts or `intakeRevision`. Duplicate provider message IDs are no-ops. The pin is stored as an APPLIED caller message, `[Shared location: <label>]`, so it shows in the transcript. Never derive coordinates from caller prose.
+- **Shared location.** `recordSharedLocation` is agent-only. It stores a provider-supplied pin or Find My location as `Incident.sharedLocation` (`latitude`, `longitude`, `accuracyMeters`, `label`, `source` `IMESSAGE_PIN | FIND_MY`, `sharedAt`). If the conversation has no active incident, it opens a partial one. It does not change caller facts or `intakeRevision`. Duplicate provider message IDs are no-ops, including after case closure. The pin is stored as an APPLIED caller message, `[Shared location: <label>]`, so it shows in the transcript. Never derive coordinates from caller prose. Coordinates must be finite and in latitude/longitude bounds; optional accuracy must be finite and nonnegative. Message IDs must be nonempty. `sharedAt` comes from the trusted provider envelope's `receivedAt`; missing optional metadata maps to null. A pin alone leaves the incident COLLECTING until an accepted report supplies a summary. After dispatch, a new location sets `needsReview` while preserving assignments and lifecycle.
+- **Human conversation control.** `takeOverConversation` claims an open incident for one dispatcher; a second dispatcher gets `TAKEN_OVER`. `releaseConversation` returns it to the agent (owner or ADMIN). Control is stored separately per incident and cannot carry into the next case. AGENT/DISPATCHER/ADMIN can read the control view; responders cannot. While controlled, extraction still records reports and corrections, but automated questions and generic OTHER replies pause. Caller-requested status replies and unit notifications continue. `sendDispatcherMessage` requires the controlling dispatcher and 1–2000 characters; `(case, dispatcher, clientMessageId)` deduplicates retries. It queues a `DISPATCHER_REPLY` and a `DISPATCHER` transcript row with `QUEUED` delivery. The agent sends on the committed private route and acknowledgment updates that same row to `SENT` or `FAILED`. Closed/resolved incidents reject control and send operations. Every outbound message retains the simulation label.
+
+The `sharedLocation` column is appended with an unknown default. Missing fact fields map to null in the adapter, preserving false and zero. Adding the six fields to the nested database `CallerFacts` type changes the existing `facts` column type: SpacetimeDB 2.10.2 rejects an automatic upgrade (verified against the previous module locally). Batch #28 and #29 for the coordinated Maincloud publish; a development reset with `--delete-data` removes historical incidents and role grants. Adapter defaults do not preserve rows deleted by that reset. See [the deployment handoff](../spacetime/HANDOFF.md#maincloud-deployment-for-28-and-29).
 - **Dispatcher console reads.**
   - `incident_conversation_view` (dispatcher only) returns the current case's caller messages and agent messages for each incident, latest 50, as `ConversationMessage` rows.
   - Questions are recorded by `recordSentQuestion`. Each notification gets one row, written when `ackNotification` reports it delivered or failed.
@@ -214,6 +220,8 @@ Types live in `@flare/contracts` (`packages/contracts/src/index.ts`). Operations
 | Reads | `listIncidents`, `listAssignments`, `listUnits`, `getMyRole` | Role-scoped: a responder sees only its unit's assignments and their incidents |
 | Shared location | `recordSharedLocation(conn, { provider, conversationKey, route, messageId, receivedAt, latitude, longitude, accuracyMeters?, label?, source })` | Agent only |
 | Console reads | `listConversation(conn, incidentId)`, `listIncidentEvents(conn, incidentId)` | Dispatcher only, oldest first |
+| Conversation control | `getConversationController(conn, incidentId)`, `takeOverConversation(conn, { incidentId })`, `releaseConversation(conn, { incidentId })` | Claim/release for dispatchers; owner identity is visible to agent/dispatcher/admin |
+| Dispatcher reply | `sendDispatcherMessage(conn, { incidentId, text, clientMessageId })` | Requires conversation owner; retry with the same client ID |
 
 Rejected operations throw `FlareOpError` with a `code`: `UNAUTHORIZED`, `NOT_FOUND`, `STALE_REVISION`, `STALE_CASE`, `INVALID_ROUTE`, `PARTIALLY_APPLIED_SOURCES`, `UNKNOWN_MESSAGE`, `INVALID_INTENT`, `INVALID_FIELD`, `INVALID_VALUE_TYPE`, `MISSING_EVIDENCE`, `EVIDENCE_QUOTE_MISMATCH`, `UNKNOWN_EVIDENCE_MESSAGE`, `NOT_READY`, `ALREADY_DISPATCHED`, `UNIT_CONFLICT`, `UNIT_SERVICE_MISMATCH`, `SERVICE_WITHOUT_UNIT`, `INVALID_TRANSITION`, `ASSIGNMENTS_NOT_COMPLETED`, `NOT_CLOSABLE`, `HAS_ASSIGNMENTS`, `REASON_REQUIRED`, `INCIDENT_CLOSED`, `INVALID_LATITUDE`, `INVALID_LONGITUDE`, `INVALID_ACCURACY`, `INVALID_LOCATION_SOURCE`, among others.
 

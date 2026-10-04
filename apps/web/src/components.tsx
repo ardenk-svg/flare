@@ -192,6 +192,10 @@ const OP_ERRORS: Record<string, string> = {
   HAS_ASSIGNMENTS: "This incident already has units assigned.",
   REASON_REQUIRED: "Give a reason for closing.",
   INCIDENT_CLOSED: "This incident is already closed.",
+  INCIDENT_ENDED: "This incident has ended. Start a new case to message the caller.",
+  TAKEN_OVER: "Another dispatcher already controls this conversation.",
+  NOT_CONVERSATION_OWNER: "Take over this conversation before sending a message.",
+  INVALID_MESSAGE: "Enter a message between 1 and 2000 characters.",
 };
 
 /** Runs a mutation, tracks pending state, and keeps the backend's error beside the action. */

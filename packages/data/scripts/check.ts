@@ -1,6 +1,7 @@
 // Focused live checks against a LOCAL SpacetimeDB database. Resets that database first.
 // Usage: FLARE_DB=flare-dev npm run check   (requires `spacetime` CLI logged in as the module publisher)
 import { execFileSync } from 'node:child_process';
+import { emptyFacts } from '@flare/contracts';
 import type { CallerFactPatch, Evidence, ExtractionResult, Intent, Recommendation } from '@flare/contracts';
 import {
   ackNotification,
@@ -25,6 +26,8 @@ import {
   recordSentQuestion,
   resolveIncident,
   FlareOpError,
+  toFacts,
+  toIncident,
   type FlareConnection,
 } from '../src/index.ts';
 
@@ -33,7 +36,9 @@ const DB = process.env.FLARE_DB ?? 'flare-dev';
 const SERVER = 'local'; // never run this against the shared integration database
 
 let failures = 0;
+let checks = 0;
 function check(name: string, ok: boolean, detail = '') {
+  checks++;
   if (!ok) failures++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail && !ok ? `  -- ${detail}` : ''}`);
 }
@@ -85,6 +90,9 @@ function result(intent: Intent, patch: CallerFactPatch, evidence: Evidence[], su
   };
 }
 
+const recordPin = (conn: FlareConnection['conn'], input: Omit<Parameters<typeof recordSharedLocation>[1], 'provider' | 'route' | 'receivedAt'>) =>
+  recordSharedLocation(conn, { provider: 'check', route: route(input.conversationKey), receivedAt: new Date().toISOString(), ...input });
+
 const FIRE_REC: Recommendation = { services: ['FIRE'], ruleIds: ['DEMO_FIRE'], reason: 'Caller reported fire or smoke.' };
 
 async function main() {
@@ -98,6 +106,15 @@ async function main() {
   const A = agent.conn;
   const KEY = 'check:conversation-1';
   check('six demo units seeded, two per service', listUnits(dispatcher.conn).map(u => u.id).join() === 'EMS-01,EMS-02,FIRE-01,FIRE-02,POLICE-01,POLICE-02' && listUnits(dispatcher.conn).every(u => u.status === 'AVAILABLE'));
+
+  const roster = listUnits(dispatcher.conn);
+  check('reset seeds two available units per service and preserves existing IDs',
+    roster.map(u => u.id).join() === 'EMS-01,EMS-02,FIRE-01,FIRE-02,POLICE-01,POLICE-02' &&
+    roster.every(u => u.status === 'AVAILABLE' && u.id.startsWith(u.service)));
+  check('reset preserves existing responder grants', getMyRole(fire.conn)?.unitId === 'FIRE-01');
+  const legacyFacts = toFacts({ fireOrSmoke: true, peopleInvolved: 0 });
+  check('legacy facts decode all missing fields as null, preserving zero and true',
+    JSON.stringify(legacyFacts) === JSON.stringify({ ...emptyFacts(), fireOrSmoke: true, peopleInvolved: 0 }));
 
   // --- Intake: receive, duplicate, failure, first report ---
   let ctx = await recordInbound(A, { provider: 'check', conversationKey: KEY, route: route(KEY), messages: [msg('m1', 'Simulation: I see smoke outside.')] });
@@ -133,6 +150,12 @@ async function main() {
   check('unsupported facts stay null', inc1.facts.fireOrSmoke === true && inc1.facts.locationText === null && inc1.facts.trappedPerson === null);
   check('recommendation stored separately from confirmed services', inc1.recommendedServices.join() === 'FIRE' && inc1.confirmedServices.length === 0);
   check('applied message leaves pending and clears error', ctx.pendingMessages.length === 0 && ctx.lastExtractionError === null && inc1.extractionError === null);
+  check('incidents without new fact claims or a shared location decode them as null',
+    inc1.sharedLocation === null && inc1.facts.weaponPresent === null && inc1.facts.suspectCount === null &&
+    inc1.facts.callerStatus === null && inc1.facts.vehicleCount === null && inc1.facts.patientAge === null && inc1.facts.roadBlocked === null);
+  const oldRow = [...A.db.incidentView.iter()].find(i => i.id.toString() === inc1.id)!;
+  check('adapter defaults an absent sharedLocation to null', toIncident({ ...oldRow, sharedLocation: undefined }).sharedLocation === null);
+
 
   await applyIntakePatch(A, { conversationKey: KEY, expectedRevision: 0, sourceMessageIds: ['m1'], result: r1, recommendation: FIRE_REC });
   check('re-applying an APPLIED batch is a harmless no-op', getConversationContext(A, KEY)!.intakeRevision === 1 && listIncidents(A).length === 1);
@@ -408,6 +431,122 @@ async function main() {
   check('close-without-dispatch logs created then closed', kindsClosed[0] === 'INCIDENT_CREATED' && kindsClosed[kindsClosed.length - 1] === 'INCIDENT_CLOSED' && !kindsClosed.includes('DISPATCH_CONFIRMED'), kindsClosed.join(','));
   check('pin logs LOCATION_RECEIVED once', listIncidentEvents(dispatcher.conn, pinned.id).filter(e => e.kind === 'LOCATION_RECEIVED').length === 1);
 
+  {
+    // --- Additional issue #28 boundary checks ---
+    const KEY28 = 'check:console-schema';
+    const consoleText = 'Simulation: weapon present, 2 suspects, hiding, 3 vehicles, patient age 25, road not blocked.';
+    const consolePatch = { weaponPresent: true, suspectCount: 2, callerStatus: 'hiding', vehicleCount: 3, patientAge: 25, roadBlocked: false };
+    const consoleEvidence: Evidence[] = [
+      { field: 'weaponPresent', messageId: 'f1', quote: 'weapon present' },
+      { field: 'suspectCount', messageId: 'f1', quote: '2 suspects' },
+      { field: 'callerStatus', messageId: 'f1', quote: 'hiding' },
+      { field: 'vehicleCount', messageId: 'f1', quote: '3 vehicles' },
+      { field: 'patientAge', messageId: 'f1', quote: 'patient age 25' },
+      { field: 'roadBlocked', messageId: 'f1', quote: 'road not blocked' },
+    ];
+    await recordInbound(A, { provider: 'check', conversationKey: KEY28, route: route(KEY28), messages: [msg('f1', consoleText)] });
+    await rejects('new caller facts still require evidence', applyIntakePatch(A, {
+      conversationKey: KEY28, expectedRevision: 0, sourceMessageIds: ['f1'],
+      result: result('REPORT', consolePatch, [], 'Caller reports a collision and a threat.'), recommendation: FIRE_REC,
+    }), 'MISSING_EVIDENCE');
+    await applyIntakePatch(A, {
+      conversationKey: KEY28, expectedRevision: 0, sourceMessageIds: ['f1'],
+      result: result('REPORT', consolePatch, consoleEvidence, 'Caller reports a collision and a threat.'), recommendation: FIRE_REC,
+    });
+    let consoleInc = getConversationContext(A, KEY28)!.activeIncident!;
+    check('all six new facts round trip with types and evidence', Object.entries(consolePatch).every(([k, v]) =>
+      consoleInc.facts[k as keyof typeof consolePatch] === v && consoleInc.evidence.some(e => e.field === k)));
+    check('facts without any location leave the incident COLLECTING', consoleInc.status === 'COLLECTING');
+
+    const pin = { conversationKey: KEY28, messageId: 'pin1', latitude: 42.28, longitude: -83.74, accuracyMeters: 5, label: 'Demo entrance', source: 'IMESSAGE_PIN' as const };
+    for (const c of [dispatcher, fire, outsider]) {
+      await rejects('only the agent can record a shared location', recordPin(c.conn, pin), 'UNAUTHORIZED');
+    }
+    for (const invalid of [{ values: { latitude: 91 }, code: 'INVALID_LATITUDE' }, { values: { longitude: -181 }, code: 'INVALID_LONGITUDE' }, { values: { latitude: NaN }, code: 'INVALID_LATITUDE' }, { values: { longitude: Infinity }, code: 'INVALID_LONGITUDE' }, { values: { accuracyMeters: -1 }, code: 'INVALID_ACCURACY' }, { values: { accuracyMeters: NaN }, code: 'INVALID_ACCURACY' }, { values: { accuracyMeters: Infinity }, code: 'INVALID_ACCURACY' }]) {
+      await rejects('invalid coordinates or accuracy are rejected', recordPin(A, { ...pin, ...invalid.values }), invalid.code);
+    }
+    await rejects('unknown location source is rejected', recordPin(A, { ...pin, source: 'MODEL' as never }), 'INVALID_LOCATION_SOURCE');
+    await rejects('location message ID must be nonempty', recordPin(A, { ...pin, messageId: ' ' }), 'INVALID_MESSAGE_ID');
+    await rejects('location requires a nonempty conversation key', recordPin(A, { ...pin, conversationKey: ' ' }), 'INVALID_CONVERSATION_KEY');
+    check('rejected locations leave incident, revision and readiness unchanged',
+      JSON.stringify(getConversationContext(A, KEY28)!.activeIncident) === JSON.stringify(consoleInc));
+
+    await recordPin(A, pin);
+    consoleInc = getConversationContext(A, KEY28)!.activeIncident!;
+    check('shared location satisfies readiness without inventing a typed location',
+      consoleInc.status === 'READY_FOR_REVIEW' && consoleInc.facts.locationText === null && consoleInc.intakeRevision === 1);
+    check('shared location maps coordinates, metadata and committed timestamp',
+      consoleInc.sharedLocation?.latitude === pin.latitude && consoleInc.sharedLocation.longitude === pin.longitude &&
+      consoleInc.sharedLocation.accuracyMeters === 5 && consoleInc.sharedLocation.label === 'Demo entrance' &&
+      consoleInc.sharedLocation.source === 'IMESSAGE_PIN' && Number.isFinite(Date.parse(consoleInc.sharedLocation.sharedAt)));
+    await waitFor('dispatcher receives location through subscription', () =>
+      listIncidents(dispatcher.conn).find(i => i.id === consoleInc.id)?.sharedLocation?.latitude === pin.latitude);
+    check('dispatcher subscription exposes the shared location', true);
+    await recordPin(A, { ...pin, latitude: 1 });
+    check('duplicate location delivery does not overwrite coordinates or increment revision',
+      JSON.stringify(getConversationContext(A, KEY28)!.activeIncident) === JSON.stringify(consoleInc));
+
+    const clearText = 'Simulation: no weapon, zero suspects, caller safe, zero vehicles, age unknown, road status unknown, location text unknown.';
+    const clearPatch = { weaponPresent: false, suspectCount: 0, callerStatus: 'safe', vehicleCount: 0, patientAge: null, roadBlocked: null, locationText: null };
+    const clearEvidence = Object.keys(clearPatch).map(field => ({ field: field as Evidence['field'], messageId: 'f2', quote: clearText }));
+    await recordInbound(A, { provider: 'check', conversationKey: KEY28, route: route(KEY28), messages: [msg('f2', clearText)] });
+    await rejects('stale extraction remains rejected after a shared location', applyIntakePatch(A, {
+      conversationKey: KEY28, expectedRevision: 0, sourceMessageIds: ['f2'],
+      result: result('CORRECTION', clearPatch, clearEvidence, 'Caller is safe; other details corrected.'), recommendation: FIRE_REC,
+    }), 'STALE_REVISION');
+    await applyIntakePatch(A, {
+      conversationKey: KEY28, expectedRevision: 1, sourceMessageIds: ['f2'],
+      result: result('CORRECTION', clearPatch, clearEvidence, 'Caller is safe; other details corrected.'), recommendation: FIRE_REC,
+    });
+    consoleInc = getConversationContext(A, KEY28)!.activeIncident!;
+    check('new facts distinguish false, zero and explicit null on correction',
+      Object.entries(clearPatch).every(([k, v]) => consoleInc.facts[k as keyof typeof clearPatch] === v));
+    check('clearing typed location keeps readiness when a shared location exists', consoleInc.status === 'READY_FOR_REVIEW' && consoleInc.sharedLocation?.latitude === pin.latitude);
+    await recordPin(A, { conversationKey: KEY28, messageId: 'pin2', latitude: 0, longitude: 0, accuracyMeters: 0, source: 'FIND_MY' });
+    consoleInc = getConversationContext(A, KEY28)!.activeIncident!;
+    check('FIND_MY location replaces the pin, preserving valid zero coordinates and accuracy',
+      consoleInc.sharedLocation?.source === 'FIND_MY' && consoleInc.sharedLocation.latitude === 0 &&
+      consoleInc.sharedLocation.longitude === 0 && consoleInc.sharedLocation.accuracyMeters === 0 && consoleInc.sharedLocation.label === null);
+    await confirmDispatchAndAssign(dispatcher.conn, { incidentId: consoleInc.id, confirmedServices: ['EMS'], unitIds: ['EMS-01', 'EMS-02'] });
+    check('two units of the same service can be assigned, leaving none available',
+      listAssignments(dispatcher.conn).filter(a => a.incidentId === consoleInc.id).length === 2 &&
+      listUnits(dispatcher.conn).filter(u => u.service === 'EMS').every(u => u.status === 'BUSY'));
+    await recordPin(A, { ...pin, messageId: 'pin3' });
+    consoleInc = getConversationContext(A, KEY28)!.activeIncident!;
+    check('post-dispatch location flags review and preserves lifecycle and assignments',
+      consoleInc.status === 'DISPATCHED' && consoleInc.needsReview && consoleInc.confirmedServices.join() === 'EMS');
+
+    const LOCATION_KEY = 'check:location-first';
+    await recordInbound(A, { provider: 'check', conversationKey: LOCATION_KEY, route: route(LOCATION_KEY), messages: [] });
+    const firstPin = { conversationKey: LOCATION_KEY, messageId: 'first-pin', latitude: 42, longitude: -83, source: 'IMESSAGE_PIN' as const };
+    await recordPin(A, firstPin);
+    const locationFirst = getConversationContext(A, LOCATION_KEY)!.activeIncident!;
+    check('location-only event opens a partial incident with empty facts and no invented summary',
+      locationFirst.status === 'COLLECTING' && locationFirst.summary === '' && locationFirst.extractionState === 'OK' &&
+      Object.values(locationFirst.facts).every(v => v === null) && locationFirst.sharedLocation?.accuracyMeters === null);
+    await recordInbound(A, { provider: 'check', conversationKey: LOCATION_KEY, route: route(LOCATION_KEY), messages: [msg('after-pin', 'Simulation: smoke here.')] });
+    await applyIntakePatch(A, {
+      conversationKey: LOCATION_KEY, expectedRevision: 0, sourceMessageIds: ['after-pin'],
+      result: result('REPORT', { fireOrSmoke: true }, [{ field: 'fireOrSmoke', messageId: 'after-pin', quote: 'smoke here' }], 'Caller reports smoke.'), recommendation: FIRE_REC,
+    });
+    check('subsequent extraction uses the location-only incident and satisfies readiness',
+      getConversationContext(A, LOCATION_KEY)!.activeIncident?.id === locationFirst.id && getConversationContext(A, LOCATION_KEY)!.activeIncident?.status === 'READY_FOR_REVIEW');
+    await waitFor('dispatcher sees location-only case', () => listIncidents(dispatcher.conn).some(i => i.id === locationFirst.id));
+    await closeIncident(dispatcher.conn, { incidentId: locationFirst.id, reason: 'Simulation complete' });
+    await waitFor('location case closes', () => getConversationContext(A, LOCATION_KEY)!.activeIncident === null);
+    await recordPin(A, firstPin);
+    check('replaying a closed case pin cannot reopen a case or leak its coordinates',
+      getConversationContext(A, LOCATION_KEY)!.activeIncident === null && getConversationContext(A, LOCATION_KEY)!.caseEpoch === 2);
+    await recordPin(A, { ...firstPin, messageId: 'second-pin', latitude: 43 });
+    const nextLocationCase = getConversationContext(A, LOCATION_KEY)!.activeIncident!;
+    check('fresh pin starts the next case with no prior facts or location', nextLocationCase.id !== locationFirst.id &&
+      nextLocationCase.caseEpoch === 2 && nextLocationCase.sharedLocation?.latitude === 43 && Object.values(nextLocationCase.facts).every(v => v === null));
+    await rejects('unassigned responder cannot record a shared location',
+      recordPin(ems.conn, firstPin), 'UNAUTHORIZED');
+    check('unassigned responder and outsider do not see shared-location incidents',
+      [fire, ems, outsider].every(c => !listIncidents(c.conn).some(i => i.id === nextLocationCase.id)));
+  }
+
   // --- Route privacy ---
   const visible = (c: FlareConnection) =>
     JSON.stringify([...c.conn.db.incidentView.iter(), ...c.conn.db.assignmentView.iter(), ...c.conn.db.unitView.iter(), ...c.conn.db.myRole.iter(), ...c.conn.db.agentConversation.iter(), ...c.conn.db.agentInbound.iter(), ...c.conn.db.agentNotification.iter(), ...c.conn.db.incidentConversationView.iter(), ...c.conn.db.incidentEventView.iter()], (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
@@ -427,7 +566,7 @@ async function main() {
   check('reconnect enumerates unacknowledged notifications with route', jobs.length > 0 && jobs.map(n => n.id).join() === pendingJobsBefore && jobs.every(n => n.route.spaceId.startsWith('space-check')));
 
   for (const c of [again, dispatcher, dispatcher2, fire, ems, outsider]) c.conn.disconnect();
-  console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) failed.`);
+  console.log(`\n${checks - failures}/${checks} checks passed.`);
   process.exit(failures === 0 ? 0 : 1);
 }
 

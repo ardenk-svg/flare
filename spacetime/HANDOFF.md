@@ -61,7 +61,7 @@ Env names (proposed, values local only): `SPACETIMEDB_URI` (e.g. `ws://127.0.0.1
 
 ## Design notes
 
-- All tables are private. Clients read only the role-gated views `my_role`, `unit_view`, `incident_view`, `assignment_view`, `agent_conversation`, `agent_inbound`, and `agent_notification`. Raw messages and conversation keys are visible only to `AGENT`.
+- All tables are private. Clients read only role-gated views. `agent_conversation`, `agent_inbound`, and `agent_notification` keep routing/context agent-private; `incident_conversation_view` and `incident_event_view` expose case transcripts and activity to dispatcher/admin identities only. Responders cannot read transcripts, and no dispatcher projection contains route fields or phone handles.
 - Each conversation stores a route (`routePlatform`, `routeSpaceId`, `routeLine`) and a `caseEpoch`. Inbound messages and incidents record their `caseEpoch`. `resolveIncident` advances the epoch and clears question fields. Agent views show only current-case messages.
 - Patches are sent as `FactChange[]` with a `FactValue` of `Unknown | Bool | Count | Text`, so omitted fields, explicit null, and false stay distinct. The adapter converts this from `CallerFactPatch`.
 - Reducers run serializably, so of two simultaneous reservations one wins and the other gets `UNIT_CONFLICT`.
@@ -69,13 +69,18 @@ Env names (proposed, values local only): `SPACETIMEDB_URI` (e.g. `ws://127.0.0.1
 
 ## Checks run (local, in-memory server)
 
-`FLARE_DB=flare-check npm run check:data:live`: 97/97 passed on 7 consecutive runs (console-schema branch, #28 and #29). New checks:
+The coordinated [PR #33](https://github.com/ardenk-svg/flare/pull/33) recorded 97/97 checks on its console-schema branch. This workspace incorporates that #28/#29 implementation and adds stricter finite accuracy/nonempty message-ID validation plus regression coverage. `FLARE_DB=flare-issue28-batch npm run check:data:live`: **134/134 passed** against a local, in-memory SpacetimeDB 2.10.2 server on October 3, 2026. Checks include:
 - six-unit seed
 - new facts stored by kind, and a mismatched kind rejected
 - `recordSharedLocation`: agent-only, range and source validation, opens a partial incident, a duplicate is a no-op, satisfies the location gate, visible to the dispatcher
 - transcript: order, sent and failed agent rows, case isolation, pin line, denied to responders and the agent
 - event log: a full report → dispatch → completed → resolved run, plus close-without-dispatch
 - route privacy extended to the new views
+- older fact objects default new fields to null; explicit false and zero survive corrections
+- both IMESSAGE_PIN and FIND_MY, zero coordinates/accuracy, omitted metadata, invalid and non-finite coordinates/accuracy, blank IDs
+- location delivery does not overwrite a duplicate, replaying a closed case does not reopen it, and a fresh pin starts an isolated case
+- typed-location removal still leaves a pin-located report ready; post-dispatch pins flag review without changing assignments
+- two same-service units can be assigned together, leaving no available unit of that service
 
 Root `npm run check` passes, and the web `smoke:live` passes. The smoke now expects 6 units.
 
@@ -99,6 +104,18 @@ Integration-state checks (64):
 
 Earlier checks cover duplicate inbound, extraction failure retry, evidence validation, stale revision, correction, unknown versus false, authorization (outsider, wrong role, wrong responder), view read restrictions, dispatch/notification atomicity, skipped stages, status queries, post-dispatch review flags, ack/failed delivery, resolve preconditions, independent assignments, concurrent reservation conflicts, and reconnecting with the same token.
 
+## Maincloud deployment for #28 and #29
+
+The shared database has not been republished from this workspace. The nested `facts` upgrade was rejected in an isolated local migration test with `requires a manual migration`; the appended defaulted location column is additive by itself. SpacetimeDB documents this distinction in [Automatic Migrations](https://spacetimedb.com/docs/databases/automatic-migrations/).
+
+After the combined change is reviewed and the designated schema owner coordinates the reset, announce that **all demo records and role grants will be erased**. Securely retain the existing client identity hexes and role/unit assignments before resetting. From `spacetime/`, the single combined publish is:
+
+```sh
+spacetime publish --server maincloud --module-path . flare-yyehc --delete-data --yes
+```
+
+The publisher regains ADMIN and `init` seeds all six units. Re-grant AGENT, DISPATCHER, and each RESPONDER with its original unit using the commands above with `--server maincloud`. Existing `FIRE-01`, `EMS-01`, and `POLICE-01` IDs remain valid; restart clients with these generated bindings. Announce the completed publish and restored grants. Do not run `check:data:live` against Maincloud; it resets its target database.
+
 ## Not done / open
 
 - `flare-yyehc` on Maincloud: the #28 facts change alters the nested `facts` struct, which SpacetimeDB rejects as a breaking change (verified locally). Publishing it needs `--delete-data`. That wipes incidents and **role grants**. Re-grant ADMIN (automatic for the publisher), DISPATCHER, RESPONDER, and AGENT afterwards.
@@ -109,3 +126,9 @@ Earlier checks cover duplicate inbound, extraction failure retry, evidence valid
 - Views use full-table `iter()`. The docs recommend indexed lookups. This is fine at demo scale and has not been load-tested.
 - Expected rejections appear as `ERROR` lines in `spacetime logs`. They are reducer `SenderError`s, not crashes.
 - No live Photon or Gemini traffic has gone through this yet. Checks use synthetic extraction results.
+
+## Dispatcher conversation control (2026-10-04)
+
+Added a private `conversation_control` table and AGENT/DISPATCHER/ADMIN view; regenerated all bindings with CLI 2.10.2. `takeOverConversation`, `releaseConversation` and `sendDispatcherMessage` enforce owner/role/open-case checks. Replies are deduplicated per case and dispatcher, labelled as simulated, queued durably, and attributed as DISPATCHER in the transcript through acknowledgment. Responders cannot read ownership or transcripts.
+
+The module typecheck/build passed. The isolated loop harness passed ownership conflict, forbidden responder takeover, forbidden non-owner send, transcript attribution/deduplication, release and complete FIRE/EMS/POLICE lifecycles. The additive publish to local `flare-dev` on port 3000 preserved its DISPATCHED incident and role grants. Recovering a real received Find My card's cached coordinates preserved assignments and flagged location review. Historical synthetic-only integration notes above describe the earlier checks; no shared Maincloud migration was run.

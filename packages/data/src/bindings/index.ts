@@ -45,9 +45,12 @@ import RecordExtractionFailureReducer from "./record_extraction_failure_reducer"
 import RecordInboundReducer from "./record_inbound_reducer";
 import RecordSentQuestionReducer from "./record_sent_question_reducer";
 import RecordSharedLocationReducer from "./record_shared_location_reducer";
+import ReleaseConversationReducer from "./release_conversation_reducer";
 import ResetDemoReducer from "./reset_demo_reducer";
 import ResolveIncidentReducer from "./resolve_incident_reducer";
 import RevokeRoleReducer from "./revoke_role_reducer";
+import SendDispatcherMessageReducer from "./send_dispatcher_message_reducer";
+import TakeOverConversationReducer from "./take_over_conversation_reducer";
 
 // Import all procedure arg schemas
 
@@ -56,6 +59,7 @@ import AgentConversationRow from "./agent_conversation_table";
 import AgentInboundRow from "./agent_inbound_table";
 import AgentNotificationRow from "./agent_notification_table";
 import AssignmentViewRow from "./assignment_view_table";
+import ConversationControlViewRow from "./conversation_control_view_table";
 import IncidentConversationViewRow from "./incident_conversation_view_table";
 import IncidentEventViewRow from "./incident_event_view_table";
 import IncidentViewRow from "./incident_view_table";
@@ -94,6 +98,13 @@ const tablesSchema = __schema({
     constraints: [
     ],
   }, AssignmentViewRow),
+  conversationControlView: __table({
+    name: 'conversation_control_view',
+    indexes: [
+    ],
+    constraints: [
+    ],
+  }, ConversationControlViewRow),
   incidentConversationView: __table({
     name: 'incident_conversation_view',
     indexes: [
@@ -144,9 +155,12 @@ const reducersSchema = __reducers(
   __reducerSchema("record_inbound", RecordInboundReducer),
   __reducerSchema("record_sent_question", RecordSentQuestionReducer),
   __reducerSchema("record_shared_location", RecordSharedLocationReducer),
+  __reducerSchema("release_conversation", ReleaseConversationReducer),
   __reducerSchema("reset_demo", ResetDemoReducer),
   __reducerSchema("resolve_incident", ResolveIncidentReducer),
   __reducerSchema("revoke_role", RevokeRoleReducer),
+  __reducerSchema("send_dispatcher_message", SendDispatcherMessageReducer),
+  __reducerSchema("take_over_conversation", TakeOverConversationReducer),
 );
 
 /** The schema information for all procedures in this module. This is defined the same way as the procedures would have been defined in the server. */

@@ -53,6 +53,7 @@ export const ALL_VIEWS = [
   tables.agentNotification,
   tables.incidentConversationView,
   tables.incidentEventView,
+  tables.conversationControlView,
 ];
 
 // ---- Errors ----
@@ -83,7 +84,7 @@ export const toId = (id: bigint): string => id.toString();
 export const fromId = (id: string): bigint => BigInt(id);
 const nul = <T>(v: T | undefined): T | null => (v === undefined ? null : v);
 
-export function toFacts(row: IncidentRow['facts']): CallerFacts {
+export function toFacts(row: Partial<IncidentRow['facts']>): CallerFacts {
   const facts = emptyFacts();
   for (const f of CALLER_FACT_FIELDS) (facts as unknown as Record<string, unknown>)[f] = nul(row[f]);
   return facts;
@@ -215,7 +216,7 @@ export const listUnits = (conn: DbConnection): Unit[] =>
 
 // ---- Dispatcher console reads ----
 
-/** Current-case caller and agent messages for an incident, oldest first (latest 50). Dispatcher only. */
+/** Current-case caller, agent and dispatcher messages, oldest first (latest 50). Dispatcher only. */
 export function listConversation(conn: DbConnection, incidentId: string): ConversationMessage[] {
   const id = fromId(incidentId);
   return [...conn.db.incidentConversationView.iter()]
@@ -232,6 +233,20 @@ export function listConversation(conn: DbConnection, incidentId: string): Conver
       at: toIso(r.at),
       delivery: nul(r.delivery) as ConversationMessage['delivery'],
     }));
+}
+
+export function getConversationController(conn: DbConnection, incidentId: string): string | null {
+  return [...conn.db.conversationControlView.iter()].find(row => row.incidentId === fromId(incidentId))?.dispatcherIdentity.toHexString() ?? null;
+}
+
+export function takeOverConversation(conn: DbConnection, input: { incidentId: string }): Promise<void> {
+  return call(conn.reducers.takeOverConversation({ incidentId: fromId(input.incidentId) }));
+}
+export function releaseConversation(conn: DbConnection, input: { incidentId: string }): Promise<void> {
+  return call(conn.reducers.releaseConversation({ incidentId: fromId(input.incidentId) }));
+}
+export function sendDispatcherMessage(conn: DbConnection, input: { incidentId: string; text: string; clientMessageId: string }): Promise<void> {
+  return call(conn.reducers.sendDispatcherMessage({ ...input, incidentId: fromId(input.incidentId) }));
 }
 
 /** Activity log for an incident, oldest first. Dispatcher only. */
@@ -289,6 +304,7 @@ function contextFor(conn: DbConnection, convo: ConversationRow): ConversationCon
     route: toRoute(convo),
     caseEpoch: convo.caseEpoch,
     activeIncident,
+    dispatcherIdentity: activeIncident ? getConversationController(conn, activeIncident.id) : null,
     intakeRevision: activeIncident?.intakeRevision ?? 0,
     currentFacts: activeIncident?.facts ?? emptyFacts(),
     currentSummary: activeIncident?.summary ?? '',

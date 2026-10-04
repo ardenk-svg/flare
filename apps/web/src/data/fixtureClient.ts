@@ -38,6 +38,12 @@ export interface FixtureClient extends FlareClient {
 }
 
 export function createFixtureClient(identity: Identity): FixtureClient {
+  let identityHex = `fixture-${identity.role}-${identity.unitId ?? 'dispatcher'}`;
+  try {
+    const key = `flare-fixture-identity:${identity.role}:${identity.unitId ?? ''}`;
+    identityHex = localStorage.getItem(key) ?? crypto.randomUUID();
+    localStorage.setItem(key, identityHex);
+  } catch { /* stable fallback for restricted storage */ }
   let shared = load();
   let connection: Snapshot["connection"] = "connected";
   let snapshot: Snapshot;
@@ -45,7 +51,7 @@ export function createFixtureClient(identity: Identity): FixtureClient {
 
   const build = () => {
     snapshot = {
-      connection, mode: "fixture", identity, access: "ok",
+      connection, mode: "fixture", identity, identityHex, access: "ok",
       incidents: shared.incidents, units: shared.units, assignments: shared.assignments,
     };
   };
@@ -74,6 +80,44 @@ export function createFixtureClient(identity: Identity): FixtureClient {
   return {
     subscribe(l) { listeners.add(l); return () => { listeners.delete(l); }; },
     getSnapshot: () => snapshot,
+
+    async takeOverConversation({ incidentId }) {
+      const g = guard("dispatcher"); if (g) return delay(g);
+      shared = load();
+      const inc = shared.incidents.find(i => i.id === incidentId);
+      if (!inc) return fail("NOT_FOUND", "Incident not found.");
+      if (inc.status === "CLOSED" || inc.status === "RESOLVED") return fail("INCIDENT_ENDED", "Incident ended.");
+      if (inc.dispatcherIdentity && inc.dispatcherIdentity !== identityHex) return fail("TAKEN_OVER", "Another dispatcher owns this conversation.");
+      shared.incidents = shared.incidents.map(i => i.id === incidentId ? { ...i, dispatcherIdentity: identityHex } : i);
+      persist(); return delay<OpResult>({ ok: true });
+    },
+    async releaseConversation({ incidentId }) {
+      const g = guard("dispatcher"); if (g) return delay(g);
+      shared = load();
+      const inc = shared.incidents.find(i => i.id === incidentId);
+      if (!inc) return fail("NOT_FOUND", "Incident not found.");
+      if (inc.dispatcherIdentity !== identityHex) return fail("NOT_CONVERSATION_OWNER", "Another dispatcher owns this conversation.");
+      shared.incidents = shared.incidents.map(i => i.id === incidentId ? { ...i, dispatcherIdentity: null } : i);
+      persist(); return delay<OpResult>({ ok: true });
+    },
+    async sendDispatcherMessage({ incidentId, text, clientMessageId }) {
+      const g = guard("dispatcher"); if (g) return delay(g);
+      shared = load();
+      const inc = shared.incidents.find(i => i.id === incidentId);
+      if (!inc) return fail("NOT_FOUND", "Incident not found.");
+      if (inc.status === "CLOSED" || inc.status === "RESOLVED") return fail("INCIDENT_ENDED", "Incident ended.");
+      if (inc.dispatcherIdentity !== identityHex) return fail("NOT_CONVERSATION_OWNER", "Take over first.");
+      if (!text.trim() || text.trim().length > 2000) return fail("INVALID_MESSAGE", "Enter 1–2000 characters.");
+      const key = `dispatcher:${incidentId}:${clientMessageId}`;
+      const receipts = JSON.parse(localStorage.getItem('flare-fixture-replies') ?? '[]') as string[];
+      if (!receipts.includes(key)) {
+        const labelled = text.trim().startsWith('[SIMULATION]') ? text.trim() : `[SIMULATION] Dispatcher: ${text.trim()}`;
+        shared.incidents = shared.incidents.map(i => i.id === incidentId ? { ...i, conversation: [...(i.conversation ?? []), { sender: "DISPATCHER", text: labelled, at: now(), delivery: "SENT" }] } : i);
+        localStorage.setItem('flare-fixture-replies', JSON.stringify([...receipts, key]));
+        persist();
+      }
+      return delay<OpResult>({ ok: true });
+    },
 
     async confirmDispatchAndAssign({ incidentId, confirmedServices, unitIds }) {
       const g = guard("dispatcher"); if (g) return delay(g);

@@ -29,6 +29,7 @@ function fakeData(
   acknowledgements: Array<{ notificationId: string; delivered: boolean; error?: string }>,
 ): AgentDataPort {
   return {
+    recordSharedLocation: async () => undefined,
     recordInbound: async () => {
       throw new Error("unused");
     },

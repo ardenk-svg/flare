@@ -4,7 +4,7 @@ import {
   ActionError, AssignmentStatusChip, AssignmentStepper, ExtractionBadge, Icon, IncidentStatusChip, Pending, RelativeTime,
   useAction, useNow,
 } from "./components";
-import { useClient } from "./data";
+import { useClient, useSnapshot } from "./data";
 import {
   ASSIGNMENT_TEXT, activityLabel, deriveSeverity, formatElapsed, formatFact, getActivity, getKnownFacts,
   getRelevantMissingFacts, headlineFact, incidentTitle, MAJOR_EVENTS, recommendationReasons, SERVICE_LABEL, shortAge,
@@ -240,14 +240,24 @@ export function IncidentFacts({ incident }: { incident: IncidentView }) {
 function Bubble({ m }: { m: ConversationMessage }) {
   return (
     <li className={`msg ${m.sender === "CALLER" ? "caller" : "agent"}`}>
-      <span className="msg-who">{m.sender === "CALLER" ? "Caller" : "Agent"}<time dateTime={m.at}>{clock(m.at)}</time>
+      <span className="msg-who">{m.sender === "CALLER" ? "Caller" : m.sender === "DISPATCHER" ? "Dispatcher" : "Agent"}<time dateTime={m.at}>{clock(m.at)}</time>
         {m.delivery === "FAILED" && <span className="chip danger">Not delivered</span>}</span>
+      {m.delivery === "QUEUED" && <span className="chip">Queued</span>}
       <span className="msg-text">{m.text}</span>
     </li>
   );
 }
 
 export function CallerConversation({ incident }: { incident: IncidentView }) {
+  const client = useClient();
+  const { connection, identityHex } = useSnapshot();
+  const control = useAction();
+  const send = useAction();
+  const [draft, setDraft] = useState("");
+  const requestId = useRef<string | null>(null);
+  const mine = !!incident.dispatcherIdentity && incident.dispatcherIdentity === identityHex;
+  const taken = !!incident.dispatcherIdentity;
+  const offline = connection !== "connected";
   const dialog = useRef<HTMLDialogElement>(null);
   const messages = incident.conversation;
   const quotes = [...new Set(incident.evidence.map((e) => e.quote))];
@@ -269,8 +279,30 @@ export function CallerConversation({ incident }: { incident: IncidentView }) {
           {last && <> · last message <RelativeTime iso={last.at} /></>}
         </span>
         {messages && messages.length > 4 && <button className="btn-link" onClick={() => dialog.current?.showModal()}>View full conversation</button>}
-        <button className="btn small-btn" disabled title="Coming soon: dispatcher takeover isn't built yet">Take over</button>
+        <button className="btn small-btn" disabled={done || offline || control.pending || (taken && !mine)}
+          onClick={() => control.run(() => mine ? client.releaseConversation({ incidentId: incident.id }) : client.takeOverConversation({ incidentId: incident.id }))}>
+          {control.pending ? "Updating…" : mine ? "Return to agent" : taken ? "Taken by another dispatcher" : "Take over"}
+        </button>
       </div>
+      <ActionError message={control.error} />
+      {taken && !done && <p className="small muted">{mine ? "You control this conversation." : "Another dispatcher controls this conversation."} Automated questions pause. Facts and unit status updates continue.</p>}
+      {mine && !done && (
+        <form className="dispatcher-compose" onSubmit={async event => {
+          event.preventDefault();
+          if (!draft.trim() || send.pending || offline) return;
+          requestId.current ??= crypto.randomUUID();
+          if (await send.run(() => client.sendDispatcherMessage({ incidentId: incident.id, text: draft.trim(), clientMessageId: requestId.current! }))) {
+            setDraft(""); requestId.current = null;
+          }
+        }}>
+          <label htmlFor={`reply-${incident.id}`} className="sublabel">Message the caller</label>
+          <textarea id={`reply-${incident.id}`} value={draft} maxLength={2000} rows={3} placeholder="Ask for details or clarify the mock report…"
+            disabled={offline || send.pending} onChange={event => { setDraft(event.target.value); requestId.current = null; }} />
+          <button className="btn primary" disabled={offline || send.pending || !draft.trim()}>{send.pending ? "Queueing…" : "Send message"}</button>
+          <p className="muted small">Messages are labelled as simulated. Delivery appears in the conversation.</p>
+          <ActionError message={send.error} />
+        </form>
+      )}
       {messages && messages.length > 4 && (
         <dialog ref={dialog} className="convo-dialog" aria-label="Full caller conversation">
           <div className="convo-dialog-head">

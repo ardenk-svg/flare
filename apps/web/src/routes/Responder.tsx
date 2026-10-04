@@ -4,6 +4,7 @@ import {
   LocationLine, Pending, RelativeTime, StaleBanner, useAction,
 } from "../components";
 import { ASSIGNMENT_ORDER, type AssignmentStatus, type CallerFacts } from "../types";
+import { ServiceTag } from "../console";
 
 const NEXT_ACTION: Partial<Record<AssignmentStatus, string>> = {
   ACCEPTED: "Accept assignment",
@@ -60,6 +61,7 @@ export default function Responder() {
         <section className={`card mission ${done ? "done" : ""}`} aria-label="Your assignment">
           <div className="mission-head">
             <span className="mono">{assignment.unitId}</span>
+            <ServiceTag service={assignment.service} />
             <AssignmentStatusChip status={assignment.status} />
           </div>
           {next ? (

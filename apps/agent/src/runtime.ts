@@ -1,4 +1,5 @@
 import { extractTurn, recommendServices } from "@flare/intake";
+import type { ExtractTurn, RecommendServices } from "@flare/contracts";
 import { connectFlare, getMyRole } from "@flare/data";
 
 import { readAgentConfig } from "./config.js";
@@ -8,6 +9,7 @@ import { runMessageLoop, type SpectrumAppEnvelope } from "./message-loop.js";
 import { NotificationWorker } from "./notification-worker.js";
 import { AgentOrchestrator, sanitizeOperationalError } from "./orchestrator.js";
 import { AgentStateStore } from "./state-store.js";
+import { FindMyBridge, type LocationApi } from "./find-my.js";
 import type { InboundMessageHandler, RouteSender } from "./types.js";
 
 interface StoppableSpectrumApp extends SpectrumAppEnvelope {
@@ -17,6 +19,7 @@ interface StoppableSpectrumApp extends SpectrumAppEnvelope {
 async function runWithShutdown(
   app: StoppableSpectrumApp,
   handler: InboundMessageHandler,
+  options: Parameters<typeof runMessageLoop>[3] = {},
 ): Promise<void> {
   let stopping = false;
 
@@ -33,7 +36,7 @@ async function runWithShutdown(
   process.once("SIGTERM", stop);
 
   try {
-    await runMessageLoop(app, handler);
+    await runMessageLoop(app, handler, console, options);
   } finally {
     process.off("SIGINT", stop);
     process.off("SIGTERM", stop);
@@ -50,6 +53,7 @@ export async function runEchoAgent(app: StoppableSpectrumApp): Promise<void> {
 export async function runAgent(
   app: StoppableSpectrumApp,
   sendRoute: RouteSender,
+  options: { locations?: LocationApi; demoPhone?: string; extractTurn?: ExtractTurn; recommendServices?: RecommendServices } = {},
 ): Promise<void> {
   const config = readAgentConfig();
   const state = await AgentStateStore.open();
@@ -82,20 +86,29 @@ export async function runAgent(
   }
 
   console.info(`Connected to SpacetimeDB as authorized agent ${connection.identityHex}.`);
-  if (!process.env.GEMINI_API_KEY?.trim()) {
+  if (!options.extractTurn && !process.env.GEMINI_API_KEY?.trim()) {
     console.error(
       "GEMINI_API_KEY is missing; reports will remain RECEIVED with a typed extraction failure.",
     );
   }
 
   const data = createAgentDataPort(connection);
+  let locations: FindMyBridge | undefined;
   const orchestrator = new AgentOrchestrator({
     data,
-    extractTurn,
-    recommendServices,
+    extractTurn: options.extractTurn ?? extractTurn,
+    recommendServices: options.recommendServices ?? recommendServices,
     state,
     sendRoute,
+    requestLocation: options.locations ? message => locations!.request(message) : undefined,
+    lookupSharedLocation: options.locations ? (message, epoch) => locations!.snapshot(message, epoch) : undefined,
   });
+  if (options.locations) {
+    locations = new FindMyBridge(options.locations, orchestrator.handleLocation, key => {
+      const context = data.getConversationContext(key);
+      return context?.activeIncident ? context.caseEpoch : undefined;
+    }, console, options.demoPhone);
+  }
   const notifications = new NotificationWorker({
     data,
     state,
@@ -107,9 +120,16 @@ export async function runAgent(
   await notifications.start();
   try {
     await orchestrator.drainPendingIntake();
-    await runWithShutdown(app, orchestrator.handleInbound);
+    await runWithShutdown(app, orchestrator.handleInbound, {
+      handleLocation: orchestrator.handleLocation,
+      handleUnsupported: orchestrator.handleUnsupported,
+      handleLocationShare: orchestrator.handleLocationShare,
+      observe: (space, message) => locations?.observe(space, message),
+      afterHandled: (space, message) => locations?.observe(space, message),
+    });
   } finally {
     notifications.stop();
+    await locations?.stop();
     connection.conn.disconnect();
   }
 }

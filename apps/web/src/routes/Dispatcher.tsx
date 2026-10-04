@@ -74,7 +74,7 @@ export default function Dispatcher() {
                   <IncidentSummary incident={incident} />
                   <IncidentLocation incident={incident} />
                   <IncidentFacts incident={incident} />
-                  <CallerConversation incident={incident} />
+                  <CallerConversation key={incident.id} incident={incident} />
                 </div>
                 <div className="col">
                   <RecommendedResponse key={incident.id} incident={incident} units={units} assignments={assignments} offline={offline} />
