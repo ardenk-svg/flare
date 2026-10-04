@@ -155,6 +155,12 @@ export const FACT_LABELS: Record<keyof CallerFacts, string> = {
   trappedPerson: "Trapped person",
   violentThreat: "Violent threat",
   injuryReported: "Injury reported",
+  weaponPresent: "Weapon present",
+  suspectCount: "Suspects",
+  callerStatus: "Caller status",
+  vehicleCount: "Vehicles involved",
+  patientAge: "Patient age",
+  roadBlocked: "Road blocked",
 };
 
 function factValue(v: string | number | boolean) {

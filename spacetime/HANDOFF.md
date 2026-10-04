@@ -19,7 +19,7 @@ cd ../data && npm install && npm run typecheck
 npm run check                # live checks; RESETS the local database first
 ```
 
-The identity that publishes becomes `ADMIN`, and `init` seeds `FIRE-01`, `EMS-01`, and `POLICE-01`.
+The identity that publishes becomes `ADMIN`. `init` and `reset_demo` seed `FIRE-01/02`, `EMS-01/02`, and `POLICE-01/02`.
 
 ## Shared integration database (Maincloud)
 
@@ -69,7 +69,17 @@ Env names (proposed, values local only): `SPACETIMEDB_URI` (e.g. `ws://127.0.0.1
 
 ## Checks run (local, in-memory server)
 
-`FLARE_DB=flare-check npm run check:data:live`: 76/76 passed on 6 consecutive runs (close-and-docs branch). Close-without-dispatch checks:
+`FLARE_DB=flare-check npm run check:data:live`: 97/97 passed on 7 consecutive runs (console-schema branch, #28 and #29). New checks:
+- six-unit seed
+- new facts stored by kind, and a mismatched kind rejected
+- `recordSharedLocation`: agent-only, range and source validation, opens a partial incident, a duplicate is a no-op, satisfies the location gate, visible to the dispatcher
+- transcript: order, sent and failed agent rows, case isolation, pin line, denied to responders and the agent
+- event log: a full report → dispatch → completed → resolved run, plus close-without-dispatch
+- route privacy extended to the new views
+
+Root `npm run check` passes, and the web `smoke:live` passes. The smoke now expects 6 units.
+
+Close-without-dispatch checks:
 - only a dispatcher can close
 - a reason is required
 - dispatched incidents can't be closed
@@ -91,7 +101,7 @@ Earlier checks cover duplicate inbound, extraction failure retry, evidence valid
 
 ## Not done / open
 
-- `flare-yyehc` on Maincloud is live with the integration-state schema (published, seeded, and the ADMIN grant verified on 2026-10-03). The `closeIncident` update only adds a column, so republishing it needs no `--delete-data`, and none is planned.
+- `flare-yyehc` on Maincloud: the #28 facts change alters the nested `facts` struct, which SpacetimeDB rejects as a breaking change (verified locally). Publishing it needs `--delete-data`. That wipes incidents and **role grants**. Re-grant ADMIN (automatic for the publisher), DISPATCHER, RESPONDER, and AGENT afterwards.
 - Role grants are pending: `AGENT` needs Person 1's hex, which `npm run agent:imessage` prints on first connect. `DISPATCHER` and `RESPONDER FIRE-01` need Person 4's browser hexes.
 - The route field mapping (`space.id`, `space.phone`) comes from the `@spectrum-ts/imessage` 12.10.1 type definitions. Person 1 should confirm it against a live inbound event.
 - `spacetime/` stays outside the root workspace, as `NEXT_STEPS.md` requires.

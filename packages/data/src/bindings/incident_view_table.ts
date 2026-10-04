@@ -12,6 +12,7 @@ import {
 import {
   CallerFacts,
   StoredEvidence,
+  SharedLocation,
 } from "./types";
 
 
@@ -40,4 +41,7 @@ export default __t.row({
   createdAt: __t.timestamp().name("created_at"),
   updatedAt: __t.timestamp().name("updated_at"),
   closeReason: __t.option(__t.string()).name("close_reason"),
+  get sharedLocation() {
+    return __t.option(SharedLocation).name("shared_location");
+  },
 });

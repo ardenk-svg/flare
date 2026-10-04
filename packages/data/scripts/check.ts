@@ -17,6 +17,9 @@ import {
   listPendingNotifications,
   listUnits,
   closeIncident,
+  listConversation,
+  listIncidentEvents,
+  recordSharedLocation,
   recordExtractionFailure,
   recordInbound,
   recordSentQuestion,
@@ -94,6 +97,7 @@ async function main() {
   const outsider = await client();
   const A = agent.conn;
   const KEY = 'check:conversation-1';
+  check('six demo units seeded, two per service', listUnits(dispatcher.conn).map(u => u.id).join() === 'EMS-01,EMS-02,FIRE-01,FIRE-02,POLICE-01,POLICE-02' && listUnits(dispatcher.conn).every(u => u.status === 'AVAILABLE'));
 
   // --- Intake: receive, duplicate, failure, first report ---
   let ctx = await recordInbound(A, { provider: 'check', conversationKey: KEY, route: route(KEY), messages: [msg('m1', 'Simulation: I see smoke outside.')] });
@@ -336,9 +340,77 @@ async function main() {
   await waitFor('agent sees second close', () => getConversationContext(A, KEY5)!.caseEpoch === 3);
   check('dispatcher closes a READY_FOR_REVIEW incident', getConversationContext(A, KEY5)!.activeIncident === null);
 
+  // --- New caller facts (#28) ---
+  const KEY6 = 'check:conversation-6';
+  await recordInbound(A, { provider: 'check', conversationKey: KEY6, route: route(KEY6), messages: [msg('r1', 'Simulation: two guys with a knife robbed the demo bookstore, I am hiding in the back.')] });
+  await rejects('fact value must match its kind', A.reducers.applyIntakePatch({
+    conversationKey: KEY6, expectedRevision: 0, sourceMessageIds: ['r1'], intent: 'REPORT',
+    changes: [{ field: 'weaponPresent', value: { tag: 'Count', value: 1 } }],
+    summary: 'x', evidence: [{ field: 'weaponPresent', messageId: 'r1', quote: 'with a knife' }],
+    corrections: [], unresolvedFields: [], recommendedServices: [], recommendationRuleIds: [], recommendationReason: '',
+  }).catch(e => { throw new FlareOpError(e.message); }), 'INVALID_VALUE_TYPE');
+  await applyIntakePatch(A, {
+    conversationKey: KEY6, expectedRevision: 0, sourceMessageIds: ['r1'],
+    result: result('REPORT', { weaponPresent: true, suspectCount: 2, callerStatus: 'hiding', vehicleCount: null, locationText: 'demo bookstore' }, [
+      { field: 'weaponPresent', messageId: 'r1', quote: 'with a knife' },
+      { field: 'suspectCount', messageId: 'r1', quote: 'two guys' },
+      { field: 'callerStatus', messageId: 'r1', quote: 'I am hiding in the back' },
+      { field: 'vehicleCount', messageId: 'r1', quote: 'robbed the demo bookstore' },
+      { field: 'locationText', messageId: 'r1', quote: 'demo bookstore' },
+    ], 'Armed robbery at the demo bookstore; caller hiding.'),
+    recommendation: { services: [], ruleIds: [], reason: 'No demo rule matched; dispatcher review required.' },
+  });
+  const robbery = getConversationContext(A, KEY6)!.activeIncident!;
+  check('new facts stored with their kinds; unknown stays null', robbery.facts.weaponPresent === true && robbery.facts.suspectCount === 2 && robbery.facts.callerStatus === 'hiding' && robbery.facts.vehicleCount === null && robbery.facts.patientAge === null && robbery.facts.roadBlocked === null);
+
+  // --- Shared location (#28) ---
+  const KEY7 = 'check:conversation-7';
+  const pin = { provider: 'check', conversationKey: KEY7, route: route(KEY7), messageId: 'loc1', receivedAt: new Date().toISOString(), latitude: 42.2808, longitude: -83.743, accuracyMeters: 12, label: 'Demo Diag', source: 'IMESSAGE_PIN' as const };
+  await rejects('only the agent records shared locations', recordSharedLocation(dispatcher.conn, pin), 'UNAUTHORIZED');
+  await rejects('latitude is range-checked', recordSharedLocation(A, { ...pin, messageId: 'bad', latitude: 91 }), 'INVALID_LATITUDE');
+  await rejects('location source is validated', recordSharedLocation(A, { ...pin, messageId: 'bad2', source: 'GUESS' as never }), 'INVALID_LOCATION_SOURCE');
+  await recordSharedLocation(A, pin);
+  ctx = getConversationContext(A, KEY7)!;
+  const pinned = ctx.activeIncident!;
+  check('pin with no incident opens a partial COLLECTING incident', pinned?.status === 'COLLECTING' && pinned.sharedLocation?.label === 'Demo Diag' && pinned.sharedLocation.source === 'IMESSAGE_PIN' && pinned.extractionState === 'OK' && pinned.intakeRevision === 0);
+  check('pin leaves typed location and facts untouched', pinned.facts.locationText === null && Object.values(pinned.facts).every(v => v === null) && ctx.pendingMessages.length === 0);
+  await recordSharedLocation(A, pin);
+  check('duplicate pin is a no-op', listIncidents(A).filter(i => i.sharedLocation?.label === 'Demo Diag').length === 1);
+  await recordInbound(A, { provider: 'check', conversationKey: KEY7, route: route(KEY7), messages: [msg('s1', 'Simulation: someone fainted here.')] });
+  await applyIntakePatch(A, {
+    conversationKey: KEY7, expectedRevision: 0, sourceMessageIds: ['s1'],
+    result: result('REPORT', { incidentType: 'fainting' }, [{ field: 'incidentType', messageId: 's1', quote: 'someone fainted' }], 'Someone fainted at the shared location.'),
+    recommendation: { services: [], ruleIds: [], reason: 'No demo rule matched; dispatcher review required.' },
+  });
+  const pinnedReady = getConversationContext(A, KEY7)!.activeIncident!;
+  check('shared location satisfies the location gate', pinnedReady.id === pinned.id && pinnedReady.status === 'READY_FOR_REVIEW' && pinnedReady.facts.locationText === null);
+  await waitFor('dispatcher sees shared location', () => listIncidents(dispatcher.conn).some(i => i.id === pinned.id && i.sharedLocation !== null));
+  check('shared location visible in dispatcher incident view', listIncidents(dispatcher.conn).find(i => i.id === pinned.id)?.sharedLocation?.latitude === 42.2808);
+
+  // --- Transcript (#29) ---
+  await waitFor('transcript arrives', () => listConversation(dispatcher.conn, inc1.id).length > 0);
+  const tA = listConversation(dispatcher.conn, inc1.id);
+  check('transcript has case-A caller messages and agent replies in time order', tA.filter(m => m.sender === 'CALLER').map(m => m.text).includes('Simulation: I see smoke outside.') && tA.some(m => m.sender === 'AGENT' && m.text === 'Which building and entrance?' && m.delivery === 'SENT') && tA.every((m, i) => i === 0 || tA[i - 1].at <= m.at));
+  check('delivered and failed notifications appear once each', tA.filter(m => m.sender === 'AGENT' && m.text.includes('assigned mock unit')).length === 1 && tA.some(m => m.sender === 'AGENT' && m.delivery === 'FAILED'));
+  const tB = listConversation(dispatcher.conn, caseB.id);
+  check('transcript is case-isolated', tB.length === 1 && tB[0].text.startsWith('Simulation: someone collapsed') && !tA.some(m => m.text.startsWith('Simulation: someone collapsed')));
+  check('shared pin shows as a caller transcript line', listConversation(dispatcher.conn, pinned.id).some(m => m.sender === 'CALLER' && m.text === '[Shared location: Demo Diag]'));
+  check('responder and agent are denied transcript and events', [...fire.conn.db.incidentConversationView.iter()].length === 0 && [...fire.conn.db.incidentEventView.iter()].length === 0 && [...A.db.incidentConversationView.iter()].length === 0 && [...outsider.conn.db.incidentEventView.iter()].length === 0);
+
+  // --- Activity log (#29) ---
+  const kindsA = listIncidentEvents(dispatcher.conn, inc1.id).map(e => e.kind);
+  const expectedA = ['INCIDENT_CREATED', 'FACTS_UPDATED', 'SERVICES_RECOMMENDED', 'CALLER_MESSAGE', 'EXTRACTION_FAILED', 'LOCATION_RECEIVED', 'DISPATCH_CONFIRMED', 'UNIT_ASSIGNED', 'UNIT_ACCEPTED', 'UNIT_EN_ROUTE', 'CALLER_NOTIFIED', 'UNIT_ON_SCENE', 'UNIT_COMPLETED', 'INCIDENT_RESOLVED'];
+  check('full run logs every lifecycle event', expectedA.every(k => kindsA.includes(k as never)) && kindsA[0] === 'INCIDENT_CREATED' && kindsA[kindsA.length - 1] === 'INCIDENT_RESOLVED', kindsA.join(','));
+  const evA = listIncidentEvents(dispatcher.conn, inc1.id);
+  check('event order follows commits', kindsA.indexOf('DISPATCH_CONFIRMED') < kindsA.indexOf('UNIT_ACCEPTED') && kindsA.indexOf('UNIT_ACCEPTED') < kindsA.indexOf('UNIT_EN_ROUTE') && kindsA.indexOf('UNIT_EN_ROUTE') < kindsA.indexOf('UNIT_COMPLETED') && evA.every((e, i) => i === 0 || evA[i - 1].at <= e.at));
+  check('events carry fields, services and units', evA.some(e => e.kind === 'FACTS_UPDATED' && e.fields.includes('fireOrSmoke')) && evA.some(e => e.kind === 'DISPATCH_CONFIRMED' && e.services.join() === 'FIRE') && evA.some(e => e.kind === 'UNIT_EN_ROUTE' && e.unitId === 'FIRE-01'));
+  const kindsClosed = listIncidentEvents(dispatcher.conn, collecting.id).map(e => e.kind);
+  check('close-without-dispatch logs created then closed', kindsClosed[0] === 'INCIDENT_CREATED' && kindsClosed[kindsClosed.length - 1] === 'INCIDENT_CLOSED' && !kindsClosed.includes('DISPATCH_CONFIRMED'), kindsClosed.join(','));
+  check('pin logs LOCATION_RECEIVED once', listIncidentEvents(dispatcher.conn, pinned.id).filter(e => e.kind === 'LOCATION_RECEIVED').length === 1);
+
   // --- Route privacy ---
   const visible = (c: FlareConnection) =>
-    JSON.stringify([...c.conn.db.incidentView.iter(), ...c.conn.db.assignmentView.iter(), ...c.conn.db.unitView.iter(), ...c.conn.db.myRole.iter(), ...c.conn.db.agentConversation.iter(), ...c.conn.db.agentInbound.iter(), ...c.conn.db.agentNotification.iter()], (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
+    JSON.stringify([...c.conn.db.incidentView.iter(), ...c.conn.db.assignmentView.iter(), ...c.conn.db.unitView.iter(), ...c.conn.db.myRole.iter(), ...c.conn.db.agentConversation.iter(), ...c.conn.db.agentInbound.iter(), ...c.conn.db.agentNotification.iter(), ...c.conn.db.incidentConversationView.iter(), ...c.conn.db.incidentEventView.iter()], (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
   check('route fields invisible to dispatcher and responder', [dispatcher, fire, ems, outsider].every(c => !visible(c).includes('space-check') && !visible(c).includes('check-line')));
 
   // --- Restart recovery: pending intake and unacknowledged notifications ---

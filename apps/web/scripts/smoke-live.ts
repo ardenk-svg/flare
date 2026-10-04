@@ -99,7 +99,7 @@ async function main() {
 
   grant(dispatcher, "DISPATCHER");
   grant(responder, "RESPONDER", "FIRE-01");
-  await observe("dispatcher grant arrives without reconnect", () => d().access === "ok" && d().identity.role === "dispatcher" && d().units.length === 3);
+  await observe("dispatcher grant arrives without reconnect", () => d().access === "ok" && d().identity.role === "dispatcher" && d().units.length === 6);
   await observe("responder grant arrives as mock unit FIRE-01", () => r().access === "ok" && r().identity.role === "responder" && r().identity.unitId === "FIRE-01");
 
   // ---- 2. Live incident pushed to the dispatcher by subscription ----
