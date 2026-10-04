@@ -30,6 +30,7 @@ export async function runMessageLoop(
   handler: InboundMessageHandler,
   logger: AgentLogger = console,
   options: {
+    locationTimeoutMs?: number;
     handleLocation?: SharedLocationHandler;
     handleUnsupported?: InboundMessageHandler;
     handleLocationShare?: InboundMessageHandler;
@@ -45,7 +46,7 @@ export async function runMessageLoop(
   for await (const [space, sourceMessage] of app.messages) {
     let event;
     try {
-      event = await normalizeInboundEvent(space, sourceMessage);
+      event = await normalizeInboundEvent(space, sourceMessage, options.locationTimeoutMs);
       if (event) options.observe?.(space, sourceMessage);
     } catch (error) {
       logger.error(`Rejected malformed Spectrum envelope: ${describeError(error)}`);
@@ -60,6 +61,7 @@ export async function runMessageLoop(
     }
 
     const { message } = event;
+    logger.info(`Inbound ${event.kind} received; queued for processing.`);
     const job = queue
       .run(message.conversationKey, async () => {
         const reply: ReplyPort = {
@@ -72,6 +74,7 @@ export async function runMessageLoop(
         else if (event.kind === "unsupported") await options.handleUnsupported?.(event.message, reply);
         else await handler(event.message, reply);
         options.afterHandled?.(space, sourceMessage);
+        logger.info(`Inbound ${event.kind} processing finished.`);
       })
       .catch((error: unknown) => {
         // Do not log caller text, routing identifiers, or credentials.

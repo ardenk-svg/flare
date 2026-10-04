@@ -4,6 +4,8 @@ export interface AgentConfig {
   spacetimeToken?: string;
   notificationPollMs: number;
   notificationMaxAttempts: number;
+  locationTimeoutMs: number;
+  intakeRetryPollMs: number;
 }
 
 function required(name: "SPACETIMEDB_URI" | "SPACETIMEDB_DATABASE"): string {
@@ -30,5 +32,7 @@ export function readAgentConfig(): AgentConfig {
     ...(token ? { spacetimeToken: token } : {}),
     notificationPollMs: positiveInteger("FLARE_NOTIFICATION_POLL_MS", 2_000),
     notificationMaxAttempts: positiveInteger("FLARE_NOTIFICATION_MAX_ATTEMPTS", 5),
+    locationTimeoutMs: positiveInteger("FLARE_LOCATION_TIMEOUT_MS", 5_000),
+    intakeRetryPollMs: positiveInteger("FLARE_INTAKE_RETRY_POLL_MS", 5_000),
   };
 }

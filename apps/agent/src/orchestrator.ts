@@ -13,6 +13,7 @@ import { toConversationRoute, toProviderRoute, type AgentDataPort, type Extracti
 import { AgentStateStore } from "./state-store.js";
 import type { TranslateText } from "@flare/intake";
 import { ConversationQueue } from "./conversation-queue.js";
+import { withDeadline } from "./deadline.js";
 import type {
   InboundMessageHandler,
   ReplyPort,
@@ -37,6 +38,9 @@ export interface AgentOrchestratorOptions {
   translateText?: TranslateText;
   requestLocation?: (message: NormalizedInboundMessage) => Promise<string>;
   lookupSharedLocation?: (message: NormalizedInboundMessage, caseEpoch?: number) => Promise<import("./types.js").NormalizedSharedLocation | null>;
+  locationTimeoutMs?: number;
+  retryBaseMs?: number;
+  now?: () => number;
 }
 
 const STATUS_QUERY = /^\s*(?:any\s+updates?|status|what(?:'s|\s+is)\s+(?:the\s+)?status|what(?:'s|\s+is)\s+happening)\s*[?.!]*\s*$/iu;
@@ -108,6 +112,13 @@ export class AgentOrchestrator {
   readonly #translateText: TranslateText | undefined;
   readonly #requestLocation: AgentOrchestratorOptions["requestLocation"];
   readonly #lookupSharedLocation: AgentOrchestratorOptions["lookupSharedLocation"];
+  readonly #locationTimeoutMs: number;
+  readonly #retryBaseMs: number;
+  readonly #now: () => number;
+  readonly #retries = new Map<string, { fingerprint: string; attempts: number; nextAt: number }>();
+  readonly #awaitingQuestion = new Set<string>();
+  #recoveryTimer?: ReturnType<typeof setInterval>;
+  #recovery?: Promise<void>;
 
   constructor(options: AgentOrchestratorOptions) {
     this.#data = options.data;
@@ -120,6 +131,9 @@ export class AgentOrchestrator {
     this.#translateText = options.translateText;
     this.#requestLocation = options.requestLocation;
     this.#lookupSharedLocation = options.lookupSharedLocation;
+    this.#locationTimeoutMs = options.locationTimeoutMs ?? 5_000;
+    this.#retryBaseMs = options.retryBaseMs ?? 5_000;
+    this.#now = options.now ?? Date.now;
   }
 
   readonly handleInbound: InboundMessageHandler = (message, reply) => this.#queue.run(message.conversationKey, async () => {
@@ -178,7 +192,7 @@ export class AgentOrchestrator {
   });
 
   readonly handleLocationShare: InboundMessageHandler = async (message, reply) => {
-    const pin = await this.#lookupSharedLocation?.(message);
+    const pin = await this.#lookupLocation(message);
     if (pin) { await this.handleLocation(pin); return; }
     await this.#queue.run(message.conversationKey, async () => {
       await this.#state.rememberRoute(message.conversationKey, message.route);
@@ -189,16 +203,74 @@ export class AgentOrchestrator {
     });
   };
 
-  async drainPendingIntake(): Promise<void> {
-    const keys = this.#data.listPendingConversationKeys();
-    if (keys.length === 0) return;
-    this.#logger.info(`Retrying pending intake for ${keys.length} conversation(s).`);
-    const results = await Promise.allSettled(
-      keys.map((conversationKey) => this.#queue.run(conversationKey, () => this.#processConversation(conversationKey))),
-    );
-    const failures = results.filter((result) => result.status === "rejected");
-    if (failures.length > 0) {
-      this.#logger.error(`${failures.length} pending intake conversation(s) could not be retried.`);
+  startRecovery(pollMs: number): void {
+    if (this.#recoveryTimer) return;
+    const drain = () => { void this.drainPendingIntake().catch(error => this.#logger.error(`Intake recovery failed: ${sanitizeOperationalError(error)}`)); };
+    this.#recoveryTimer = setInterval(drain, pollMs);
+    this.#recoveryTimer.unref();
+    drain();
+  }
+
+  async stopRecovery(): Promise<void> {
+    clearInterval(this.#recoveryTimer);
+    this.#recoveryTimer = undefined;
+    await this.#recovery;
+  }
+
+  drainPendingIntake(): Promise<void> {
+    if (this.#recovery) return this.#recovery;
+    this.#recovery = this.#drain().finally(() => { this.#recovery = undefined; });
+    return this.#recovery;
+  }
+
+  async #drain(): Promise<void> {
+    const keys = new Set([...this.#data.listPendingConversationKeys(), ...(this.#data.listConversationKeys?.() ?? [])]);
+    await Promise.allSettled([...keys].map(key => this.#queue.run(key, async () => {
+      const context = this.#data.getConversationContext(key);
+      if (!context) return;
+      const retry = this.#retries.get(key);
+      if (retry?.fingerprint === this.#fingerprint(context) && this.#now() < retry.nextAt) return;
+      try {
+        if (context.pendingMessages.length) {
+          this.#logger.info("Recovering persisted intake.");
+          await this.#processConversation(key);
+        } else if (context.activeIncident && (this.#awaitingQuestion.has(key) || context.lastQuestionDelivery !== "SENT")) {
+          await this.#askNext(key);
+        }
+      } catch (error) {
+        this.#scheduleRetry(this.#data.getConversationContext(key) ?? context, true);
+        this.#logger.error(`Intake recovery failed: ${sanitizeOperationalError(error)}`);
+      }
+    })));
+  }
+
+  #fingerprint(context: ConversationContext): string {
+    return JSON.stringify([context.caseEpoch, context.intakeRevision, context.pendingMessages.map(message => message.id)]);
+  }
+
+  #scheduleRetry(context: ConversationContext, retryable: boolean): void {
+    const fingerprint = this.#fingerprint(context);
+    const prior = this.#retries.get(context.conversationKey);
+    const attempts = (prior?.fingerprint === fingerprint ? prior.attempts : 0) + 1;
+    const delay = Math.min(this.#retryBaseMs * 2 ** (attempts - 1), 30_000);
+    this.#retries.set(context.conversationKey, { fingerprint, attempts,
+      nextAt: retryable && attempts < 5 ? this.#now() + delay : Infinity });
+    this.#logger.info(retryable && attempts < 5 ? `Intake recovery scheduled in ${delay} ms.` : "Automatic intake retries stopped; original input remains saved.");
+  }
+
+  async #recordFailure(context: ConversationContext, error: ExtractionFailure): Promise<void> {
+    await this.#data.recordExtractionFailure({ conversationKey: context.conversationKey, messageIds: context.pendingMessages.map(message => message.id), error });
+    this.#scheduleRetry(context, error.retryable);
+    this.#logger.error(`Intake ${error.code}: ${sanitizeOperationalError(error.message)}`);
+  }
+
+  async #lookupLocation(message: NormalizedInboundMessage, epoch?: number): Promise<import("./types.js").NormalizedSharedLocation | null> {
+    if (!this.#lookupSharedLocation) return null;
+    try {
+      return await withDeadline(this.#lookupSharedLocation(message, epoch), this.#locationTimeoutMs, "Shared location lookup");
+    } catch {
+      this.#logger.info("Shared location lookup unavailable; continuing intake and listening for pins.");
+      return null;
     }
   }
 
@@ -207,6 +279,7 @@ export class AgentOrchestrator {
       const context = this.#data.getConversationContext(conversationKey);
       if (!context || context.pendingMessages.length === 0) return;
       const messageIds = context.pendingMessages.map((message) => message.id);
+      this.#logger.info(`Processing ${messageIds.length} persisted intake message(s).`);
       if (this.#translateText) {
         try {
           for (const message of context.pendingMessages) {
@@ -215,7 +288,7 @@ export class AgentOrchestrator {
             await this.#data.recordInboundTranslation({ conversationKey, messageId: message.id, language: translated.sourceLanguage, translatedText: translated.text });
           }
         } catch {
-          await this.#data.recordExtractionFailure({ conversationKey, messageIds, error: { code: 'PROVIDER_ERROR', message: 'Gemini translation unavailable; original input is retained for retry.', retryable: true } });
+          await this.#recordFailure(context, { code: 'PROVIDER_ERROR', message: 'Gemini translation unavailable; original input is retained for retry.', retryable: true });
           return;
         }
       }
@@ -228,11 +301,13 @@ export class AgentOrchestrator {
           intent: "STATUS_QUERY",
           replyText: renderCommittedStatus(context, this.#data.listAssignments()),
         });
+        this.#retries.delete(conversationKey);
         return;
       }
 
       let outcome;
       try {
+        this.#logger.info("Requesting Gemini extraction.");
         outcome = await this.#extractTurn(buildTurn(context));
       } catch (error) {
         const failure: ExtractionFailure = {
@@ -240,16 +315,12 @@ export class AgentOrchestrator {
           message: sanitizeOperationalError(error),
           retryable: true,
         };
-        await this.#data.recordExtractionFailure({ conversationKey, messageIds, error: failure });
+        await this.#recordFailure(context, failure);
         return;
       }
 
       if (!outcome.ok) {
-        await this.#data.recordExtractionFailure({
-          conversationKey,
-          messageIds,
-          error: outcome.error,
-        });
+        await this.#recordFailure(context, outcome.error);
         return;
       }
 
@@ -264,6 +335,7 @@ export class AgentOrchestrator {
               ? renderCommittedStatus(context, this.#data.listAssignments())
               : context.dispatcherIdentity || context.activeIncident ? undefined : OTHER_REPLY,
         });
+        this.#retries.delete(conversationKey);
         if (result.intent === 'OTHER' && context.activeIncident) await this.#askNext(conversationKey, reply);
         return;
       }
@@ -287,9 +359,12 @@ export class AgentOrchestrator {
 
       // A Find My share may predate this report. Resolve it before asking for location;
       // the background snapshot would otherwise sit behind this turn in the queue.
+      this.#retries.delete(conversationKey);
+      this.#awaitingQuestion.add(conversationKey);
+      this.#logger.info("Intake facts committed; checking the next clarification.");
       const committed = this.#data.getConversationContext(conversationKey);
       if (inbound && this.#lookupSharedLocation && committed && !committed.activeIncident?.sharedLocation && !committed.currentFacts.locationText?.trim()) {
-        const pin = await this.#lookupSharedLocation({ ...inbound, providerMessageId: `findmy-context-${inbound.providerMessageId}` }, committed.caseEpoch);
+        const pin = await this.#lookupLocation({ ...inbound, providerMessageId: `findmy-context-${inbound.providerMessageId}` }, committed.caseEpoch);
         if (pin) await this.#recordLocation(pin);
       }
 
@@ -301,11 +376,11 @@ export class AgentOrchestrator {
 
   async #askNext(conversationKey: string, reply?: ReplyPort, result?: import("@flare/contracts").ExtractionResult): Promise<void> {
     const current = this.#data.getConversationContext(conversationKey);
-    if (!current || current.dispatcherIdentity || current.activeIncident?.status === 'CLOSED' || current.activeIncident?.status === 'RESOLVED') return;
+    if (!current || current.dispatcherIdentity || current.activeIncident?.status === 'CLOSED' || current.activeIncident?.status === 'RESOLVED') { this.#awaitingQuestion.delete(conversationKey); return; }
     const facts = mergeFacts(current.currentFacts, result?.patch ?? {});
     const addressed = [...(current.activeIncident?.unresolvedFields ?? []), ...(result?.unresolvedFields ?? [])];
     const missing = missingIntakeFields(facts, !!current.activeIncident?.sharedLocation, addressed);
-    if (!missing.length) return;
+    if (!missing.length) { this.#awaitingQuestion.delete(conversationKey); return; }
     let question = result?.questionField && missing.includes(result.questionField) ? result.proposedQuestion : null;
     if (question && LOCATION_QUESTION.test(question) && !missing.includes('locationText')) question = null;
     question ||= INTAKE_QUESTIONS[missing[0]];
@@ -342,6 +417,8 @@ export class AgentOrchestrator {
         ...(translatedText ? { translatedText, language } : {}),
         delivered: true,
       });
+      this.#awaitingQuestion.delete(conversationKey);
+      this.#retries.delete(conversationKey);
     } catch (error) {
       const message = sanitizeOperationalError(error);
       await this.#data.recordSentQuestion({
@@ -351,6 +428,8 @@ export class AgentOrchestrator {
         delivered: false,
         error: message,
       });
+      if (current) this.#scheduleRetry(current, true);
+      this.#awaitingQuestion.add(conversationKey);
       this.#logger.error(`A clarification question could not be delivered: ${message}`);
     }
   }

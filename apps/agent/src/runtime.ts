@@ -103,12 +103,13 @@ export async function runAgent(
     translateText: options.translateText ?? translateText,
     requestLocation: options.locations ? message => locations!.request(message) : undefined,
     lookupSharedLocation: options.locations ? (message, epoch) => locations!.snapshot(message, epoch) : undefined,
+    locationTimeoutMs: config.locationTimeoutMs,
   });
   if (options.locations) {
     locations = new FindMyBridge(options.locations, orchestrator.handleLocation, key => {
       const context = data.getConversationContext(key);
       return context?.activeIncident ? context.caseEpoch : undefined;
-    }, console, options.demoPhone);
+    }, console, options.demoPhone, config.locationTimeoutMs);
   }
   const notifications = new NotificationWorker({
     data,
@@ -119,10 +120,12 @@ export async function runAgent(
     translateText: options.translateText ?? translateText,
   });
 
-  await notifications.start();
   try {
-    await orchestrator.drainPendingIntake();
+    // Listening must not wait for an old provider call or queued delivery.
+    void notifications.start().catch(error => console.error(`Notification startup failed: ${sanitizeOperationalError(error)}`));
+    orchestrator.startRecovery(config.intakeRetryPollMs);
     await runWithShutdown(app, orchestrator.handleInbound, {
+      locationTimeoutMs: config.locationTimeoutMs,
       handleLocation: orchestrator.handleLocation,
       handleUnsupported: orchestrator.handleUnsupported,
       handleLocationShare: orchestrator.handleLocationShare,
@@ -131,6 +134,7 @@ export async function runAgent(
     });
   } finally {
     notifications.stop();
+    await orchestrator.stopRecovery();
     await locations?.stop();
     connection.conn.disconnect();
   }

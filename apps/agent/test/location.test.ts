@@ -82,3 +82,17 @@ test("the message loop routes text, pins and unreadable attachments to different
     });
   assert.deepEqual(order, ["text", "pin", "fallback"]);
 });
+
+test("a stuck vCard download cannot prevent a later text and pin from reaching the handlers", async () => {
+  const order: string[] = [];
+  const messages = [
+    envelope({ type: "attachment", name: "pin.vcf", read: () => new Promise(() => {}) }),
+    envelope({ type: "text", text: "Simulation: smoke" }),
+    envelope({ type: "contact", ...fromVCard(card) }),
+  ];
+  await runMessageLoop({ messages: (async function* () { for (const message of messages) yield [space, message] as const; })() },
+    async () => { order.push("text"); }, { info: () => {}, error: () => {} }, {
+      locationTimeoutMs: 5, handleUnsupported: async () => { order.push("fallback"); }, handleLocation: async () => { order.push("pin"); },
+    });
+  assert.deepEqual(order, ["fallback", "text", "pin"]);
+});

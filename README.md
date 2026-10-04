@@ -142,6 +142,8 @@ To rehearse repeatedly, start `npm run e2e -- --keep` once, then use **Restart d
 
 For payload diagnostics, stop the designated phone worker before running `npm run agent:probe:locations -- --seconds=60`, then restart the worker. The probe records incoming shapes and caller-specific API availability without logging handles or coordinates. Keep exactly one inbox consumer running.
 
+Provider location reads and attachment downloads have a five-second deadline (`FLARE_LOCATION_TIMEOUT_MS`), so an unavailable Find My snapshot cannot stall replies or later messages. Find My reconnects its feed automatically and a new sharing card resumes updates after Restart demo. Temporary intake/translation failures and undelivered clarifications recover while the worker runs, with exponential backoff and five attempts per unchanged input. `FLARE_INTAKE_RETRY_POLL_MS` controls the recovery poll (default 5000 ms); new input starts another attempt. Check `.flare/logs/agent.log` for received/processed message stages and sanitized provider failures. To load code fixes into an existing demo without clearing it, stop the runner and start `npm run e2e -- --keep`.
+
 ## Testing
 
 | Suite | Command | Last recorded result |

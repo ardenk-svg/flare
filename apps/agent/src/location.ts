@@ -1,5 +1,6 @@
 import { normalizeInboundMessage, type SpectrumMessageEnvelope, type SpectrumSpaceEnvelope } from "./normalize.js";
 import type { NormalizedInboundMessage, NormalizedSharedLocation } from "./types.js";
+import { withDeadline } from "./deadline.js";
 
 type Point = Pick<NormalizedSharedLocation, "latitude" | "longitude" | "label">;
 const MAX_CARD_BYTES = 256 * 1024;
@@ -88,10 +89,10 @@ export type InboundEvent =
   | { kind: "unsupported"; message: NormalizedInboundMessage };
 
 /** Control events and outbound echoes never generate replies. */
-export async function normalizeInboundEvent(space: SpectrumSpaceEnvelope, source: SpectrumMessageEnvelope): Promise<InboundEvent | null> {
+export async function normalizeInboundEvent(space: SpectrumSpaceEnvelope, source: SpectrumMessageEnvelope, timeoutMs = 5_000): Promise<InboundEvent | null> {
   if (source.direction !== "inbound") return null;
   if (source.content.type === "reply" && source.content.content && typeof source.content.content === "object" && "type" in source.content.content) {
-    return normalizeInboundEvent(space, { ...source, content: source.content.content as SpectrumMessageEnvelope["content"] });
+    return normalizeInboundEvent(space, { ...source, content: source.content.content as SpectrumMessageEnvelope["content"] }, timeoutMs);
   }
   if (["typing", "read", "reaction", "edit", "unsend", "rename", "avatar", "addMember", "removeMember", "leaveSpace"].includes(source.content.type)) return null;
   // Reuse the envelope checks and routing of ordinary text intake.
@@ -99,7 +100,7 @@ export async function normalizeInboundEvent(space: SpectrumSpaceEnvelope, source
   if (source.platform === "imessage") {
     // A failed attachment read still gets a caller-visible fallback.
     let point: Point | null = null;
-    try { point = await pointFromContent(source); } catch { /* unsupported below */ }
+    try { point = await withDeadline(pointFromContent(source), timeoutMs, "Location content read"); } catch { /* unsupported below */ }
     if (point) {
       const { text: _text, ...envelope } = base;
       return { kind: "location", message: { ...envelope, ...point, source: "IMESSAGE_PIN" } };

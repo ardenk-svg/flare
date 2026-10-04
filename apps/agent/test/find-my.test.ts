@@ -103,3 +103,74 @@ test("a sharing card gets only the caller's snapshot even when list fails, and l
   assert.deepEqual(addresses, [phone]);
   await bridge.stop();
 });
+
+test("a stalled snapshot times out and the live feed still starts", async () => {
+  const mock = api({ address: phone });
+  mock.locationApi.get = () => new Promise(() => {});
+  const pins: NormalizedSharedLocation[] = [];
+  const bridge = new FindMyBridge(mock.locationApi, async pin => { pins.push(pin); }, () => 1, logger, phone, 5);
+  bridge.observe({ id: "chat", type: "dm" }, envelope);
+  assert.equal(await bridge.snapshot(message, 1), null);
+  await tick();
+  assert.deepEqual(mock.watched, [phone]);
+  mock.emit({ address: phone, latitude: 0, longitude: 0 });
+  await tick();
+  assert.equal(pins.length, 1);
+  await bridge.stop();
+});
+
+test("a timed-out snapshot cannot apply late coordinates and a stalled request gets a fallback", async () => {
+  const mock = api({ address: phone });
+  let complete: ((location: FriendLocation) => void) | undefined;
+  mock.locationApi.get = () => new Promise(resolve => { complete = resolve; });
+  mock.locationApi.request = () => new Promise(() => {});
+  const pins: NormalizedSharedLocation[] = [];
+  const bridge = new FindMyBridge(mock.locationApi, async pin => { pins.push(pin); }, () => undefined, logger, phone, 5);
+  bridge.observe({ id: "chat", type: "dm" }, envelope);
+  assert.equal(await bridge.snapshot(message), null);
+  complete?.({ address: phone, latitude: 0, longitude: 0 });
+  await tick();
+  assert.equal(pins.length, 0);
+  assert.match(await bridge.request(message), /isn't available/);
+  await bridge.stop();
+});
+
+test("an explicit new Find My card resumes the feed after Restart demo without reusing the old share", async () => {
+  const mock = api({ address: phone, latitude: 0, longitude: 0 });
+  let epoch = 1;
+  const pins: NormalizedSharedLocation[] = [];
+  const bridge = new FindMyBridge(mock.locationApi, async pin => { pins.push(pin); }, () => epoch, logger, phone);
+  bridge.observe({ id: "chat", type: "dm" }, envelope);
+  await tick();
+  epoch = 2;
+  bridge.observe({ id: "chat", type: "dm" }, { ...envelope, id: "new-report" });
+  mock.emit({ address: phone, latitude: 1, longitude: 1 }); await tick();
+  assert.equal(pins.length, 1);
+  assert.equal(await bridge.snapshot(message, 2), null);
+  bridge.observe({ id: "chat", type: "dm" }, { ...envelope, id: "new-share", balloonBundleId: "com.apple.findmy.FindMyMessagesApp" });
+  mock.emit({ address: phone, latitude: 1, longitude: 1 }); await tick();
+  assert.equal(pins.length, 2);
+  assert.notEqual(pins[1]?.providerMessageId, pins[0]?.providerMessageId);
+  assert.ok(await bridge.snapshot(message, 2));
+  await bridge.stop();
+});
+
+test("a disconnected Find My feed reconnects and shutdown stops reconnect attempts", async () => {
+  const mock = api({ address: phone });
+  const watch = mock.locationApi.watch;
+  let attempts = 0;
+  mock.locationApi.watch = address => {
+    if (++attempts === 1) return { close: async () => {}, async *[Symbol.asyncIterator]() { throw new Error("Disconnected"); } };
+    return watch(address);
+  };
+  const pins: NormalizedSharedLocation[] = [];
+  const bridge = new FindMyBridge(mock.locationApi, async pin => { pins.push(pin); }, () => 1, logger, phone, 5, 5);
+  bridge.observe({ id: "chat", type: "dm" }, envelope);
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(attempts, 2);
+  mock.emit({ address: phone, latitude: 0, longitude: 0 }); await tick();
+  assert.equal(pins.length, 1);
+  await bridge.stop();
+  await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(attempts, 2);
+});
