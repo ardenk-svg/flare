@@ -7,6 +7,7 @@ import {
 import type { IncidentView, Service } from "../types";
 
 const SERVICES: Service[] = ["FIRE", "EMS", "POLICE"];
+const isDone = (i: IncidentView) => i.status === "RESOLVED" || i.status === "CLOSED";
 const byNewest = (a: IncidentView, b: IncidentView) => b.createdAt.localeCompare(a.createdAt);
 const title = (i: IncidentView) =>
   i.facts.incidentType ? i.facts.incidentType[0].toUpperCase() + i.facts.incidentType.slice(1) : "Unclassified report";
@@ -43,8 +44,8 @@ export default function Dispatcher() {
   const dispatch = useAction();
   const resolve = useAction();
 
-  const active = incidents.filter((i) => i.status !== "RESOLVED").sort(byNewest);
-  const resolved = incidents.filter((i) => i.status === "RESOLVED").sort(byNewest);
+  const active = incidents.filter((i) => !isDone(i)).sort(byNewest);
+  const resolved = incidents.filter(isDone).sort(byNewest);
   const incident = incidents.find((i) => i.id === selectedId) ?? active[0] ?? resolved[0];
   const incidentId = incident?.id ?? null;
   const mine = assignments.filter((a) => a.incidentId === incidentId);
@@ -89,8 +90,8 @@ export default function Dispatcher() {
                 {active.map((i) => <QueueRow key={i.id} incident={i} selected={i.id === incidentId} onSelect={() => setSelectedId(i.id)} />)}
               </ul>}
           {resolved.length > 0 && (
-            <details className="resolved-group" open={incident?.status === "RESOLVED" || undefined}>
-              <summary>Resolved ({resolved.length})</summary>
+            <details className="resolved-group" open={(incident && isDone(incident)) || undefined}>
+              <summary>Resolved and closed ({resolved.length})</summary>
               <ul className="queue-list">
                 {resolved.map((i) => <QueueRow key={i.id} incident={i} selected={i.id === incidentId} onSelect={() => setSelectedId(i.id)} />)}
               </ul>

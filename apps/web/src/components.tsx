@@ -59,6 +59,7 @@ const INCIDENT_STATUS: Record<IncidentStatus, { label: string; tone: string }> =
   READY_FOR_REVIEW: { label: "Ready for review", tone: "info" },
   DISPATCHED: { label: "Dispatched", tone: "violet" },
   RESOLVED: { label: "Resolved", tone: "ok" },
+  CLOSED: { label: "Closed, no dispatch", tone: "" },
 };
 export function IncidentStatusChip({ status }: { status: IncidentStatus }) {
   const s = INCIDENT_STATUS[status] ?? { label: status, tone: "" };
