@@ -7,7 +7,7 @@ import {
 import { useClient, useSnapshot } from "./data";
 import {
   ASSIGNMENT_TEXT, FACT_LABELS, activityLabel, deriveSeverity, formatElapsed, formatFact, getActivity, getKnownFacts,
-  getRelevantMissingFacts, headlineFact, incidentTitle, MAJOR_EVENTS, recommendationReasons, SERVICE_LABEL, shortAge,
+  getRelevantMissingFacts, hasReportedDistress, headlineFact, incidentTitle, MAJOR_EVENTS, recommendationReasons, SERVICE_LABEL, shortAge,
   unitStatusLabel, type Severity,
 } from "./incident";
 import type { Assignment, ConversationMessage, IncidentView, Service, SharedLocation, Unit } from "./types";
@@ -18,15 +18,23 @@ export const isDone = (i: IncidentView) => i.status === "RESOLVED" || i.status =
 const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 // ---- Small pieces ----
-const SEVERITY_TEXT: Record<Severity, string> = { CRITICAL: "Critical", HIGH: "High", MEDIUM: "Medium", LOW: "Low" };
-const SEVERITY_HINT = "Display priority calculated from the caller-reported facts. Not a triage decision.";
+const SEVERITY_TEXT: Record<Severity, string> = { CRITICAL: "Critical", HIGH: "High", UNASSESSED: "Needs assessment", MEDIUM: "Medium" };
+const SEVERITY_HINT = "Display priority calculated from caller reports. Not a triage decision.";
 
 export function SeverityBadge({ level, long = false }: { level: Severity; long?: boolean }) {
   return (
-    <span className={`sev sev-${level.toLowerCase()}`} title={SEVERITY_HINT}>
-      {SEVERITY_TEXT[level]}{long ? " priority" : ""}
+    <span className={`sev sev-${level.toLowerCase()}`} title={level === "UNASSESSED" ? "Insufficient processed information to assign a display priority. Review the caller's report." : SEVERITY_HINT}>
+      {SEVERITY_TEXT[level]}{long && level !== "UNASSESSED" ? " priority" : ""}
     </span>
   );
+}
+
+export function CallerDistressNotice({ incident }: { incident: IncidentView }) {
+  return !isDone(incident) && hasReportedDistress(incident) ? (
+    <div className="notice err" role="status">
+      <Icon name="alert" /><span>Caller distress reported. Review the conversation and clarify their condition.</span>
+    </div>
+  ) : null;
 }
 
 export function ServiceTag({ service }: { service: Service }) {
@@ -50,6 +58,7 @@ export function IncidentListItem({ incident, selected, fresh, onSelect }: {
 }) {
   const now = useNow(5000);
   const sev = deriveSeverity(incident);
+  const distress = !isDone(incident) && hasReportedDistress(incident);
   const fact = headlineFact(incident);
   const rec = incident.recommendedServices.length
     ? `${incident.recommendedServices.map((s) => SERVICE_LABEL[s]).join(" + ")} recommended` : null;
@@ -70,9 +79,10 @@ export function IncidentListItem({ incident, selected, fresh, onSelect }: {
           ? <span className="qcard-loc"><Icon name="pin" /><span>{loc}</span></span>
           : <span className="qcard-loc missing"><Icon name="alert" /><span>Location missing</span></span>}
         {line && <span className="qcard-line">{line}</span>}
-        {(incident.needsReview || incident.extraction.state !== "OK" || incident.status === "DISPATCHED") && (
+        {(distress || incident.needsReview || incident.extraction.state !== "OK" || incident.status === "DISPATCHED") && (
           <span className="qcard-flags">
             {incident.status === "DISPATCHED" && <IncidentStatusChip status="DISPATCHED" />}
+            {distress && <span className="chip danger">Distress reported</span>}
             {incident.needsReview && <span className="chip danger">Needs review</span>}
             <ExtractionBadge incident={incident} />
           </span>

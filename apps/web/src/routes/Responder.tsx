@@ -5,7 +5,8 @@ import {
   LocationLine, Pending, RelativeTime, StaleBanner, useAction,
 } from "../components";
 import { ASSIGNMENT_ORDER, type AssignmentStatus, type CallerFacts } from "../types";
-import { CallerConversation, IncidentFacts, ActivityFeed, ServiceTag } from "../console";
+import { CallerConversation, CallerDistressNotice, IncidentFacts, ActivityFeed, ServiceTag, SeverityBadge } from "../console";
+import { deriveSeverity } from "../incident";
 
 const NEXT_ACTION: Partial<Record<AssignmentStatus, string>> = {
   ACCEPTED: "Accept assignment",
@@ -67,6 +68,7 @@ export default function Responder() {
           <div className="mission-head">
             <span className="mono">{assignment.unitId}</span>
             <ServiceTag service={assignment.service} />
+            {!done && <SeverityBadge level={deriveSeverity(incident)} />}
             <AssignmentStatusChip status={assignment.status} />
           </div>
           {next ? (
@@ -82,6 +84,7 @@ export default function Responder() {
           <RelativeTime iso={assignment.updatedAt} prefix="Updated" />
         </section>
 
+        <CallerDistressNotice incident={incident} />
         {incident.needsReview && (
           <div className="notice err" role="status">
             <Icon name="alert" /><span>The caller changed facts after dispatch. The dispatcher is reviewing them.</span>

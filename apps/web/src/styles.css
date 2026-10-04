@@ -158,7 +158,7 @@ button { font: inherit; }
 .qcard.sevline-critical { border-left-color: var(--crit); }
 .qcard.sevline-high { border-left-color: #f87171; }
 .qcard.sevline-medium { border-left-color: #f59e0b; }
-.qcard.sevline-low { border-left-color: var(--border-strong); }
+.qcard.sevline-unassessed { border-left-color: var(--info-fg); }
 .qcard-top { display: flex; align-items: center; gap: 8px; }
 .qcard-id { color: var(--text-3); }
 .qcard-age { margin-left: auto; font-size: 13px; color: var(--text-3); font-variant-numeric: tabular-nums; }
@@ -191,8 +191,8 @@ button { font: inherit; }
 .sev-high::before { background: currentColor; border-radius: 1px; transform: rotate(45deg) scale(.85); }
 .sev-medium { background: var(--warn-bg); border-color: var(--warn-bd); color: var(--warn-fg); }
 .sev-medium::before { background: currentColor; border-radius: 50%; }
-.sev-low { background: var(--surface-2); border-color: var(--border-strong); color: var(--text-2); }
-.sev-low::before { border: 2px solid currentColor; border-radius: 50%; width: 6px; height: 6px; }
+.sev-unassessed { background: var(--info-bg); border-color: var(--info-bd); color: var(--info-fg); }
+.sev-unassessed::before { border: 2px solid currentColor; border-radius: 50%; width: 6px; height: 6px; }
 .ihead .sev { font-size: 13px; padding: 5px 10px; }
 
 /* Services */
